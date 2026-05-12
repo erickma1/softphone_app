@@ -19,13 +19,12 @@ class MySoftphoneApp extends StatelessWidget {
   }
 }
 
-// Model for call log entries
+// Simple call log entry (for UI only, not used in core logic)
 class CallLogEntry {
   final String number;
-  final String status; // 'Connected', 'Missed', 'Outgoing'
+  final String status;
   final DateTime date;
-  final int duration; // in seconds
-
+  final int duration;
   CallLogEntry({
     required this.number,
     required this.status,
@@ -58,7 +57,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final LinphoneFlutterPlugin _linphonePlugin = LinphoneFlutterPlugin();
   int _selectedIndex = 0; // 0: Dialer, 1: Call Log, 2: Settings
 
-  // SIP settings
+  // SIP settings (same as old working code)
   final _sipUsernameController = TextEditingController();
   final _sipPasswordController = TextEditingController();
   final _sipDomainController = TextEditingController();
@@ -66,35 +65,29 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   RegistrationState _registrationState = RegistrationState.None;
   String _registrationError = '';
 
-  // Dialer state
+  // Dialer state (same as old working code)
   final _dialNumberController = TextEditingController();
   CallState? _currentCallState;
   String _debugMessage = '';
 
-  // Local call log
+  // Local call log (optional – we'll add entries manually)
   List<CallLogEntry> _callLogs = [];
-  DateTime? _callStartTime;
-  String? _lastDialedNumber;
-  bool _isIncomingCall = false;
-  String? _incomingNumber;
 
   @override
   void initState() {
     super.initState();
     _initAndSetup();
-    _loadStoredCredentials();
+    // Rebuild when number field changes (for backspace button)
     _dialNumberController.addListener(() {
       if (mounted) setState(() {});
     });
   }
 
-  Future<void> _loadStoredCredentials() async {
-    // Optional: use shared_preferences to load saved credentials
-  }
-
+  // ----------------------------------------------------------------------
+  // Core logic – identical to old working code
+  // ----------------------------------------------------------------------
   Future<void> _initAndSetup() async {
     await _requestPermissions();
-
     _linphonePlugin.addCallStateListener().listen((dynamic state) {
       final callState = _convertCallState(state);
       setState(() => _currentCallState = callState);
@@ -104,60 +97,31 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         _showIncomingCallDialog();
       }
 
-      // Track call start and end for local logs
-      if (callState == CallState.Connected && _callStartTime == null) {
-        _callStartTime = DateTime.now();
-        _log('Call started at ${_callStartTime}');
-      }
-
-      if (callState == CallState.End || callState == CallState.Error) {
-        if (_callStartTime != null && _lastDialedNumber != null) {
-          final duration = DateTime.now().difference(_callStartTime!).inSeconds;
-          _addCallLog(
-            number: _lastDialedNumber!,
-            status: 'Outgoing',
-            date: _callStartTime!,
-            duration: duration,
-          );
-          _callStartTime = null;
-          _lastDialedNumber = null;
-        } else if (_isIncomingCall && _incomingNumber != null) {
-          // Incoming call was answered – we would have set _callStartTime earlier
-          // but if not, we still log as missed or answered?
-          // For simplicity, we only log answered outgoing calls.
-          // You can expand this.
-          _isIncomingCall = false;
-          _incomingNumber = null;
-        }
-        _resetAudioDevices();
+      // Optional: add call log when call ends (Connected -> End)
+      if (callState == CallState.End &&
+          _currentCallState == CallState.Connected) {
+        // We don't have duration easily, so just log a simple entry
+        _addCallLog(_dialNumberController.text.trim(), 'Outgoing');
       }
     });
   }
 
-  void _addCallLog({
-    required String number,
-    required String status,
-    required DateTime date,
-    required int duration,
-  }) {
+  void _addCallLog(String number, String status) {
     setState(() {
       _callLogs.insert(
         0,
         CallLogEntry(
           number: number,
           status: status,
-          date: date,
-          duration: duration,
+          date: DateTime.now(),
+          duration: 0, // not tracking duration in this simple version
         ),
       );
-      // Keep only last 100 logs
       if (_callLogs.length > 100) _callLogs.removeLast();
     });
   }
 
   void _showIncomingCallDialog() {
-    // For incoming calls, we could set _incomingNumber from call details.
-    // Since the plugin may not provide it easily, we'll just show the dialog.
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -177,11 +141,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
             onPressed: () async {
               Navigator.pop(context);
               // await _answerCall();
-              _isIncomingCall = true;
-              _callStartTime = DateTime.now();
-              // The number would be obtained from call object; for now we use placeholder
-              _incomingNumber = 'Incoming';
-              _log('Call answered');
             },
             child: const Text('Answer'),
           ),
@@ -192,21 +151,12 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
   // Future<void> _answerCall() async {
   //   try {
-  //     await _linphonePlugin.answerCall();
+  // await _linphonePlugin.answerCall();
+  //     _log('Call answered');
   //   } catch (e) {
   //     _log('Failed to answer call: $e');
   //   }
   // }
-
-  Future<void> _resetAudioDevices() async {
-    try {
-      await _linphonePlugin.toggleMute();
-      await Future.delayed(const Duration(milliseconds: 100));
-      await _linphonePlugin.toggleMute();
-    } catch (e) {
-      _log('Could not reset audio: $e');
-    }
-  }
 
   Future<void> _requestPermissions() async {
     final statuses = await [
@@ -219,7 +169,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     }
   }
 
-  Future<void> _register() async {
+  Future<void> _login() async {
     final username = _sipUsernameController.text.trim();
     final password = _sipPasswordController.text.trim();
     final domain = _sipDomainController.text.trim();
@@ -232,7 +182,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     setState(() {
       _registrationState = RegistrationState.Progress;
       _isRegistered = false;
-      _registrationError = '';
     });
     _log('Attempting SIP registration...');
 
@@ -248,7 +197,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         _isRegistered = true;
       });
       _log('Registration successful');
-      setState(() => _selectedIndex = 0);
     } catch (e) {
       setState(() {
         _registrationState = RegistrationState.Failed;
@@ -287,8 +235,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
       _log('Not registered – cannot call');
       return;
     }
-    _lastDialedNumber = number;
-    _callStartTime = null; // will be set when Connected state arrives
     try {
       await _linphonePlugin.call(number: number);
       _log('Calling $number...');
@@ -324,15 +270,15 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     return CallState.Idle;
   }
 
-  // ---------- Dialer UI ----------
-
+  // ----------------------------------------------------------------------
+  // UI Components
+  // ----------------------------------------------------------------------
   Widget _buildDialer() {
     bool isCallActive =
         _currentCallState != null &&
         _currentCallState != CallState.Idle &&
         _currentCallState != CallState.End &&
         _currentCallState != CallState.Error;
-
     bool hasText = _dialNumberController.text.isNotEmpty;
 
     return Column(
@@ -341,7 +287,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Number display
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
@@ -352,10 +297,10 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   style: const TextStyle(fontSize: 32),
                   textAlign: TextAlign.center,
                   keyboardType: TextInputType.phone,
-                  // decoration: const InputDecoration(
-                  //   // hintText: 'Enter number',
-                  //   // border: OutlineInputBorder(),
-                  // ),
+                  decoration: const InputDecoration(
+                    hintText: 'Enter number',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -410,20 +355,18 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                 ],
               ),
               const SizedBox(height: 30),
-              // Button row aligned under * 0 #
+              // Row with call/hangup and backspace
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Empty placeholder under *
                   const SizedBox(width: 80),
                   const SizedBox(width: 20),
-                  // Call button under 0
                   SizedBox(
                     width: 80,
                     child: ElevatedButton.icon(
                       onPressed: isCallActive ? _hangUp : _makeCall,
                       icon: Icon(isCallActive ? Icons.call_end : Icons.call),
-                      label: Text(isCallActive ? 'Hang Up' : ''),
+                      label: Text(isCallActive ? 'Hang Up' : 'Call'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: isCallActive
                             ? Colors.red
@@ -433,7 +376,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     ),
                   ),
                   const SizedBox(width: 20),
-                  // Backspace button under # – appears only when text present
                   if (hasText)
                     SizedBox(
                       width: 80,
@@ -455,9 +397,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                       ),
                     )
                   else
-                    const SizedBox(
-                      width: 80,
-                    ), // invisible placeholder to keep alignment
+                    const SizedBox(width: 80),
                 ],
               ),
               const SizedBox(height: 20),
@@ -485,7 +425,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     );
   }
 
-  // ---------- Call Log UI (local) ----------
   Widget _buildCallLog() {
     if (_callLogs.isEmpty) {
       return const Center(child: Text('No call logs yet'));
@@ -500,7 +439,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
             color: log.status == 'Outgoing' ? Colors.green : Colors.blue,
           ),
           title: Text(log.number),
-          subtitle: Text('${log.date.toLocal()}  ·  ${log.duration}s'),
+          subtitle: Text('${log.date.toLocal()}'),
           trailing: IconButton(
             icon: const Icon(Icons.call),
             onPressed: () {
@@ -513,7 +452,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     );
   }
 
-  // ---------- Settings UI ----------
   Widget _buildSettings() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -539,7 +477,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
             const CircularProgressIndicator()
           else
             ElevatedButton(
-              onPressed: _isRegistered ? _logout : _register,
+              onPressed: _isRegistered ? _logout : _login,
               child: Text(_isRegistered ? 'Logout' : 'Register'),
             ),
           if (_registrationState == RegistrationState.Ok)
@@ -575,7 +513,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // title: const Text('Number 6 Softphon'),
+        title: const Text('Number 6 Softphone'),
         actions: [
           if (_isRegistered)
             IconButton(
