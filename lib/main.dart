@@ -83,6 +83,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     super.initState();
     _initAndSetup();
     _loadStoredCredentials();
+    _dialNumberController.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _loadStoredCredentials() async {
@@ -322,24 +325,37 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   }
 
   // ---------- Dialer UI ----------
+
   Widget _buildDialer() {
+    bool isCallActive =
+        _currentCallState != null &&
+        _currentCallState != CallState.Idle &&
+        _currentCallState != CallState.End &&
+        _currentCallState != CallState.Error;
+
+    bool hasText = _dialNumberController.text.isNotEmpty;
+
     return Column(
       children: [
         Expanded(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Number display
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
                 child: TextField(
                   controller: _dialNumberController,
-                  style: const TextStyle(fontSize: 28),
+                  style: const TextStyle(fontSize: 32),
                   textAlign: TextAlign.center,
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    hintText: 'Enter number',
-                    border: OutlineInputBorder(),
-                  ),
+                  // decoration: const InputDecoration(
+                  //   // hintText: 'Enter number',
+                  //   // border: OutlineInputBorder(),
+                  // ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -351,48 +367,100 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   backgroundColor: Colors.grey[200],
                 ),
               const SizedBox(height: 20),
+              // Numeric keypad
+              Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      '1',
+                      '2',
+                      '3',
+                    ].map((digit) => _dialButton(digit)).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      '4',
+                      '5',
+                      '6',
+                    ].map((digit) => _dialButton(digit)).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      '7',
+                      '8',
+                      '9',
+                    ].map((digit) => _dialButton(digit)).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dialButton('*'),
+                      const SizedBox(width: 20),
+                      _dialButton('0'),
+                      const SizedBox(width: 20),
+                      _dialButton('#'),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 30),
+              // Button row aligned under * 0 #
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  ElevatedButton.icon(
-                    onPressed: _makeCall,
-                    icon: const Icon(Icons.call),
-                    label: const Text('Call'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 30,
-                        vertical: 15,
+                  // Empty placeholder under *
+                  const SizedBox(width: 80),
+                  const SizedBox(width: 20),
+                  // Call button under 0
+                  SizedBox(
+                    width: 80,
+                    child: ElevatedButton.icon(
+                      onPressed: isCallActive ? _hangUp : _makeCall,
+                      icon: Icon(isCallActive ? Icons.call_end : Icons.call),
+                      label: Text(isCallActive ? 'Hang Up' : ''),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isCallActive
+                            ? Colors.red
+                            : Colors.green,
+                        foregroundColor: Colors.white,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 40),
-                  ElevatedButton.icon(
-                    onPressed: _hangUp,
-                    icon: const Icon(Icons.call_end),
-                    label: const Text('Hang Up'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 30,
-                        vertical: 15,
+                  const SizedBox(width: 20),
+                  // Backspace button under # – appears only when text present
+                  if (hasText)
+                    SizedBox(
+                      width: 80,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final text = _dialNumberController.text;
+                          if (text.isNotEmpty) {
+                            _dialNumberController.text = text.substring(
+                              0,
+                              text.length - 1,
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey[400],
+                          foregroundColor: Colors.black,
+                        ),
+                        child: const Icon(Icons.backspace, size: 28),
                       ),
-                    ),
-                  ),
+                    )
+                  else
+                    const SizedBox(
+                      width: 80,
+                    ), // invisible placeholder to keep alignment
                 ],
               ),
               const SizedBox(height: 20),
-              Wrap(
-                spacing: 20,
-                runSpacing: 20,
-                alignment: WrapAlignment.center,
-                children: [
-                  for (var i = 1; i <= 9; i++) _dialButton(i.toString()),
-                  _dialButton('0'),
-                  _dialButton('*'),
-                  _dialButton('#'),
-                ],
-              ),
             ],
           ),
         ),
@@ -402,15 +470,17 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
   Widget _dialButton(String digit) {
     return SizedBox(
-      width: 70,
-      height: 70,
+      width: 80,
+      height: 80,
       child: ElevatedButton(
         onPressed: () => _dialNumberController.text += digit,
         style: ElevatedButton.styleFrom(
           shape: const CircleBorder(),
-          padding: EdgeInsets.zero,
+          backgroundColor: Colors.grey[300],
+          foregroundColor: Colors.black,
+          textStyle: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
         ),
-        child: Text(digit, style: const TextStyle(fontSize: 24)),
+        child: Text(digit),
       ),
     );
   }
@@ -505,7 +575,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Number 6 Softphone'),
+        // title: const Text('Number 6 Softphon'),
         actions: [
           if (_isRegistered)
             IconButton(
