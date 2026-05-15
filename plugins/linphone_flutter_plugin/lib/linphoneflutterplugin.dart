@@ -20,6 +20,10 @@ class LinphoneFlutterPlugin {
     }
   }
 
+  Future<void> answerCall() async {
+    await _channel.invokeMethod('answerCall');
+  }
+
   Future<void> login(
       {required String userName,
       required String domain,
@@ -53,21 +57,21 @@ class LinphoneFlutterPlugin {
     return _channel.invokeMethod("remove_call_listener");
   }
 
-  Future<bool> callTransfer({required String destination})async{
+  Future<bool> callTransfer({required String destination}) async {
     var data = {"destination": destination};
     return await _channel.invokeMethod("transfer", data);
   }
 
-  Future<CallLogs> callLogs()async{
-   var list =  await _channel.invokeMethod("call_logs");
-    return  CallLogs.fromJson(jsonDecode(list));
+  Future<CallLogs> callLogs() async {
+    var list = await _channel.invokeMethod("call_logs");
+    return CallLogs.fromJson(jsonDecode(list));
   }
 
-  Future<void> answercall()async{
+  Future<void> answercall() async {
     return await _channel.invokeMethod("answerCall");
   }
 
-  Future<void> rejectCall()async{
+  Future<void> rejectCall() async {
     return await _channel.invokeMethod("rejectCall");
   }
 
@@ -88,7 +92,6 @@ class LinphoneFlutterPlugin {
       return loginState;
     });
   }
-
 
   Stream<CallState> addCallStateListener() {
     return _callEventListener.receiveBroadcastStream().map((event) {

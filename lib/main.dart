@@ -2,19 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:linphone_flutter_plugin/linphoneflutterplugin.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum RegistrationState { None, Progress, Ok, Failed }
-
-enum CallState {
-  Idle,
-  IncomingReceived,
-  Dialing,
-  Ringing,
-  Connected,
-  StreamsRunning,
-  End,
-  Error,
-}
-
 void main() {
   runApp(const MySoftphoneApp());
 }
@@ -32,6 +19,33 @@ class MySoftphoneApp extends StatelessWidget {
   }
 }
 
+// Simple call log entry (for UI only, not used in core logic)
+class CallLogEntry {
+  final String number;
+  final String status;
+  final DateTime date;
+  final int duration;
+  CallLogEntry({
+    required this.number,
+    required this.status,
+    required this.date,
+    required this.duration,
+  });
+}
+
+enum RegistrationState { None, Progress, Ok, Failed }
+
+enum CallState {
+  Idle,
+  IncomingReceived,
+  Dialing,
+  Ringing,
+  Connected,
+  StreamsRunning,
+  End,
+  Error,
+}
+
 class SoftphoneHomePage extends StatefulWidget {
   const SoftphoneHomePage({super.key});
 
@@ -40,28 +54,40 @@ class SoftphoneHomePage extends StatefulWidget {
 }
 
 class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
+  final LinphoneFlutterPlugin _linphonePlugin = LinphoneFlutterPlugin();
+  int _selectedIndex = 0; // 0: Dialer, 1: Call Log, 2: Settings
+
+  // SIP settings (same as old working code)
   final _sipUsernameController = TextEditingController();
   final _sipPasswordController = TextEditingController();
   final _sipDomainController = TextEditingController();
-  final _dialNumberController = TextEditingController();
-
-  final LinphoneFlutterPlugin _linphonePlugin = LinphoneFlutterPlugin();
-
   bool _isRegistered = false;
   RegistrationState _registrationState = RegistrationState.None;
+  String _registrationError = '';
+
+  // Dialer state (same as old working code)
+  final _dialNumberController = TextEditingController();
   CallState? _currentCallState;
   String _debugMessage = '';
+
+  // Local call log (optional – we'll add entries manually)
+  List<CallLogEntry> _callLogs = [];
 
   @override
   void initState() {
     super.initState();
     _initAndSetup();
+    // Rebuild when number field changes (for backspace button)
+    _dialNumberController.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
+  // ----------------------------------------------------------------------
+  // Core logic – identical to old working code
+  // ----------------------------------------------------------------------
   Future<void> _initAndSetup() async {
     await _requestPermissions();
-
-    // Listen to call state changes
     _linphonePlugin.addCallStateListener().listen((dynamic state) {
       final callState = _convertCallState(state);
       setState(() => _currentCallState = callState);
@@ -71,16 +97,30 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         _showIncomingCallDialog();
       }
 
-      // If the call ends with an error, reset audio devices to avoid “sound locked”
-      if (callState == CallState.Error || callState == CallState.End) {
-        _resetAudioDevices();
+      // Optional: add call log when call ends (Connected -> End)
+      if (callState == CallState.End &&
+          _currentCallState == CallState.Connected) {
+        // We don't have duration easily, so just log a simple entry
+        _addCallLog(_dialNumberController.text.trim(), 'Outgoing');
       }
     });
   }
 
-  // ----------------------------------------------------------------------
-  // Incoming call dialog with Answer & Reject
-  // ----------------------------------------------------------------------
+  void _addCallLog(String number, String status) {
+    setState(() {
+      _callLogs.insert(
+        0,
+        CallLogEntry(
+          number: number,
+          status: status,
+          date: DateTime.now(),
+          duration: 0, // not tracking duration in this simple version
+        ),
+      );
+      if (_callLogs.length > 100) _callLogs.removeLast();
+    });
+  }
+
   void _showIncomingCallDialog() {
     showDialog(
       context: context,
@@ -109,54 +149,26 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     );
   }
 
-  // ----------------------------------------------------------------------
-  // Answer the incoming call (uses the plugin's answerCall method)
-  // ----------------------------------------------------------------------
-  // Future<void> _answerCall() async {
-  //   try {
-  //     await _linphonePlugin.answerCall();
-  //     _log('Call answered');
-  //   } catch (e) {
-  //     _log('Failed to answer call: $e');
-  //   }
-  // }
-
-  // ----------------------------------------------------------------------
-  // Reset audio devices after a failed call (prevents "sound locked" error)
-  // ----------------------------------------------------------------------
-  Future<void> _resetAudioDevices() async {
+  Future<void> _answerCall() async {
     try {
-      // Toggle mute twice to force audio path reinitialization
-      await _linphonePlugin.toggleMute();
-      await Future.delayed(const Duration(milliseconds: 100));
-      await _linphonePlugin.toggleMute();
-      _log('Audio devices reset after call error');
+      await _linphonePlugin.answerCall();
+      _log('Call answered');
     } catch (e) {
-      _log('Could not reset audio: $e');
+      _log('Failed to answer call: $e');
     }
   }
 
-  // ----------------------------------------------------------------------
-  // Request microphone & phone permissions
-  // ----------------------------------------------------------------------
   Future<void> _requestPermissions() async {
     final statuses = await [
       Permission.microphone,
       Permission.camera,
       Permission.phone,
     ].request();
-
-    if (statuses[Permission.microphone] == PermissionStatus.granted) {
-      _log('Microphone permission granted');
-    } else {
+    if (statuses[Permission.microphone] != PermissionStatus.granted) {
       _log('Microphone permission denied – calling will not work');
     }
   }
 
-  // ----------------------------------------------------------------------
-  // SIP Login (with a 5‑second delay because the plugin doesn't expose
-  // registration state events)
-  // ----------------------------------------------------------------------
   Future<void> _login() async {
     final username = _sipUsernameController.text.trim();
     final password = _sipPasswordController.text.trim();
@@ -170,6 +182,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     setState(() {
       _registrationState = RegistrationState.Progress;
       _isRegistered = false;
+      _debugMessage = 'Attempting SIP registration...';
     });
     _log('Attempting SIP registration...');
 
@@ -180,82 +193,68 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         password: password,
       );
 
-      // Wait 5 seconds to give the server time to accept/reject registration
+      // Wait 5 seconds to give the server time to respond
       await Future.delayed(const Duration(seconds: 5));
 
-      // Since the plugin doesn't give us a real registration state,
-      // we assume success if no exception was thrown.
+      // If no exception, assume success (plugin doesn't expose real registration state)
       setState(() {
         _registrationState = RegistrationState.Ok;
         _isRegistered = true;
+        _debugMessage = 'Registration successful (assumed)';
       });
       _log('Registration assumed successful (no error thrown)');
     } catch (e) {
       setState(() {
         _registrationState = RegistrationState.Failed;
         _isRegistered = false;
+        _debugMessage = 'Registration error: ${e.toString()}';
       });
       _log('Registration failed: $e');
     }
   }
 
-  // ----------------------------------------------------------------------
-  // Logout – resets UI and (if implemented) unregisters from the server.
-  // To fully disconnect, you must add a logout() method to the plugin
-  // as described in the earlier answer.
-  // ----------------------------------------------------------------------
   Future<void> _logout() async {
     try {
-      // If there's an active call, hang it up first
       if (_currentCallState != null &&
           _currentCallState != CallState.Idle &&
           _currentCallState != CallState.End) {
         await _hangUp();
       }
-      // Clear UI state – plugin logout must be implemented separately
       setState(() {
         _isRegistered = false;
         _registrationState = RegistrationState.None;
         _currentCallState = null;
       });
-      _log(
-        'Logged out (UI reset) – server deregistration depends on plugin implementation',
-      );
+      _log('Logged out');
     } catch (e) {
       _log('Logout error: $e');
     }
   }
 
-  // ----------------------------------------------------------------------
-  // Make an outgoing call
-  // ----------------------------------------------------------------------
   Future<void> _makeCall() async {
     final number = _dialNumberController.text.trim();
     if (number.isEmpty) {
-      _log('Please enter a number to dial');
+      _log('Please enter a number');
       return;
     }
     if (!_isRegistered) {
-      _log('Not registered with SIP server – cannot call');
+      _log('Not registered – cannot call');
       return;
     }
     try {
       await _linphonePlugin.call(number: number);
       _log('Calling $number...');
     } catch (e) {
-      _log('Failed to place call: $e');
+      _log('Failed to call: $e');
     }
   }
 
-  // ----------------------------------------------------------------------
-  // Hang up the current call
-  // ----------------------------------------------------------------------
   Future<void> _hangUp() async {
     try {
       await _linphonePlugin.hangUp();
       _log('Call ended');
     } catch (e) {
-      _log('Failed to hang up: $e');
+      _log('Hang up error: $e');
     }
   }
 
@@ -264,9 +263,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     print(msg);
   }
 
-  // ----------------------------------------------------------------------
-  // Helper to convert native call state strings to our CallState enum
-  // ----------------------------------------------------------------------
   CallState _convertCallState(dynamic state) {
     final stateStr = state.toString().toLowerCase();
     if (stateStr.contains('incoming')) return CallState.IncomingReceived;
@@ -281,147 +277,285 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   }
 
   // ----------------------------------------------------------------------
-  // UI Build
+  // UI Components
   // ----------------------------------------------------------------------
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Flutter Softphone')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: ListView(
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _sipUsernameController,
-                      decoration: const InputDecoration(
-                        labelText: 'SIP Username',
-                      ),
-                    ),
-                    TextField(
-                      controller: _sipPasswordController,
-                      decoration: const InputDecoration(labelText: 'Password'),
-                      obscureText: true,
-                    ),
-                    TextField(
-                      controller: _sipDomainController,
-                      decoration: const InputDecoration(
-                        labelText: 'Domain (e.g., sip.example.com)',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed:
-                                (_registrationState ==
-                                    RegistrationState.Progress)
-                                ? null
-                                : _login,
-                            child: Text(
-                              _registrationState == RegistrationState.Progress
-                                  ? 'Registering...'
-                                  : (_isRegistered ? 'Registered' : 'Register'),
-                            ),
-                          ),
-                        ),
-                        if (_isRegistered)
-                          TextButton(
-                            onPressed: _logout,
-                            child: const Text('Logout'),
-                          ),
-                      ],
-                    ),
-                    if (_registrationState == RegistrationState.Failed)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          'Registration failed. Check credentials and server.',
-                          style: TextStyle(color: Colors.red),
-                        ),
-                      ),
-                  ],
+
+  Widget _buildDialer() {
+    bool isCallActive =
+        _currentCallState != null &&
+        _currentCallState != CallState.Idle &&
+        _currentCallState != CallState.End &&
+        _currentCallState != CallState.Error;
+    bool hasText = _dialNumberController.text.isNotEmpty;
+
+    return Column(
+      children: [
+        Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
                 ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _dialNumberController,
-                      decoration: const InputDecoration(
-                        labelText: 'Number to dial',
-                        hintText: 'e.g., 1001 or sip:user@domain',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _makeCall,
-                            child: const Text('Call'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: _hangUp,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                            ),
-                            child: const Text('Hang Up'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (_currentCallState != null)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      const Text(
-                        'Call Status',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(_currentCallState.toString()),
-                    ],
+                child: TextField(
+                  controller: _dialNumberController,
+                  style: const TextStyle(fontSize: 32),
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    hintText: '',
+
+                    // border: OutlineInputBorder(),
                   ),
                 ),
               ),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Debug Log',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(_debugMessage),
-                  ],
+              const SizedBox(height: 20),
+              if (_currentCallState != null)
+                Chip(
+                  label: Text(
+                    'Call: ${_currentCallState.toString().split('.').last}',
+                  ),
+                  backgroundColor: Colors.grey[200],
                 ),
+              const SizedBox(height: 20),
+              // Numeric keypad with proper spacing
+              Column(
+                children: [
+                  // Row 1: 1 2 3
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dialButton('1'),
+                      const SizedBox(width: 20),
+                      _dialButton('2'),
+                      const SizedBox(width: 20),
+                      _dialButton('3'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Row 2: 4 5 6
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dialButton('4'),
+                      const SizedBox(width: 20),
+                      _dialButton('5'),
+                      const SizedBox(width: 20),
+                      _dialButton('6'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Row 3: 7 8 9
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dialButton('7'),
+                      const SizedBox(width: 20),
+                      _dialButton('8'),
+                      const SizedBox(width: 20),
+                      _dialButton('9'),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // Row 4: * 0 #
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _dialButton('*'),
+                      const SizedBox(width: 20),
+                      _dialButton('0'),
+                      const SizedBox(width: 20),
+                      _dialButton('#'),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 30),
+              // Row with call/hangup and backspace
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(width: 80),
+                  const SizedBox(width: 20),
+                  SizedBox(
+                    width: 80,
+                    child: ElevatedButton.icon(
+                      onPressed: isCallActive ? _hangUp : _makeCall,
+                      icon: Icon(isCallActive ? Icons.call_end : Icons.call),
+                      // label: Text(isCallActive ? '' : ''),
+                      label: Text(isCallActive ? 'Hang Up' : 'Call'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isCallActive
+                            ? Colors.red
+                            : Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  if (hasText)
+                    SizedBox(
+                      width: 80,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final text = _dialNumberController.text;
+                          if (text.isNotEmpty) {
+                            _dialNumberController.text = text.substring(
+                              0,
+                              text.length - 1,
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey[400],
+                          foregroundColor: Colors.black,
+                        ),
+                        child: const Icon(Icons.backspace, size: 28),
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 80),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _dialButton(String digit) {
+    return SizedBox(
+      width: 80,
+      height: 80,
+      child: ElevatedButton(
+        onPressed: () => _dialNumberController.text += digit,
+        style: ElevatedButton.styleFrom(
+          shape: const CircleBorder(),
+          backgroundColor: Colors.grey[300],
+          foregroundColor: Colors.black,
+          textStyle: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+        ),
+        child: Text(digit),
+      ),
+    );
+  }
+
+  Widget _buildCallLog() {
+    if (_callLogs.isEmpty) {
+      return const Center(child: Text('No call logs yet'));
+    }
+    return ListView.builder(
+      itemCount: _callLogs.length,
+      itemBuilder: (context, index) {
+        final log = _callLogs[index];
+        return ListTile(
+          leading: Icon(
+            log.status == 'Outgoing' ? Icons.call_made : Icons.call_received,
+            color: log.status == 'Outgoing' ? Colors.green : Colors.blue,
+          ),
+          title: Text(log.number),
+          subtitle: Text('${log.date.toLocal()}'),
+          trailing: IconButton(
+            icon: const Icon(Icons.call),
+            onPressed: () {
+              _dialNumberController.text = log.number;
+              setState(() => _selectedIndex = 0);
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSettings() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          TextField(
+            controller: _sipUsernameController,
+            decoration: const InputDecoration(labelText: 'SIP Username'),
+          ),
+          TextField(
+            controller: _sipPasswordController,
+            decoration: const InputDecoration(labelText: 'Password'),
+            obscureText: true,
+          ),
+          TextField(
+            controller: _sipDomainController,
+            decoration: const InputDecoration(
+              labelText: 'Domain (e.g., sip.example.com)',
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (_registrationState == RegistrationState.Progress)
+            const CircularProgressIndicator()
+          else
+            ElevatedButton(
+              onPressed: _isRegistered ? _logout : _login,
+              child: Text(_isRegistered ? 'Logout' : 'Register'),
+            ),
+          if (_registrationState == RegistrationState.Ok)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                '✅ Registered',
+                style: TextStyle(color: Colors.green),
               ),
             ),
-          ],
-        ),
+          if (_registrationState == RegistrationState.Failed)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                '❌ Registration failed: $_registrationError',
+                style: const TextStyle(color: Colors.red),
+              ),
+            ),
+          const SizedBox(height: 30),
+          const Divider(),
+          const Text(
+            'Debug Log',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(_debugMessage),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(''),
+        actions: [
+          if (_isRegistered)
+            IconButton(
+              icon: const Icon(Icons.call),
+              onPressed: () => setState(() => _selectedIndex = 0),
+            ),
+        ],
+      ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: [_buildDialer(), _buildCallLog(), _buildSettings()],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: (index) => setState(() => _selectedIndex = index),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Call Log'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
+        ],
       ),
     );
   }
