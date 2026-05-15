@@ -149,14 +149,14 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     );
   }
 
-  // Future<void> _answerCall() async {
-  //   try {
-  // await _linphonePlugin.answerCall();
-  //     _log('Call answered');
-  //   } catch (e) {
-  //     _log('Failed to answer call: $e');
-  //   }
-  // }
+  Future<void> _answerCall() async {
+    try {
+      await _linphonePlugin.answerCall();
+      _log('Call answered');
+    } catch (e) {
+      _log('Failed to answer call: $e');
+    }
+  }
 
   Future<void> _requestPermissions() async {
     final statuses = await [
@@ -182,6 +182,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     setState(() {
       _registrationState = RegistrationState.Progress;
       _isRegistered = false;
+      _debugMessage = 'Attempting SIP registration...';
     });
     _log('Attempting SIP registration...');
 
@@ -191,17 +192,22 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         domain: domain,
         password: password,
       );
+
+      // Wait 5 seconds to give the server time to respond
       await Future.delayed(const Duration(seconds: 5));
+
+      // If no exception, assume success (plugin doesn't expose real registration state)
       setState(() {
         _registrationState = RegistrationState.Ok;
         _isRegistered = true;
+        _debugMessage = 'Registration successful (assumed)';
       });
-      _log('Registration successful');
+      _log('Registration assumed successful (no error thrown)');
     } catch (e) {
       setState(() {
         _registrationState = RegistrationState.Failed;
         _isRegistered = false;
-        _registrationError = e.toString();
+        _debugMessage = 'Registration error: ${e.toString()}';
       });
       _log('Registration failed: $e');
     }
@@ -273,6 +279,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   // ----------------------------------------------------------------------
   // UI Components
   // ----------------------------------------------------------------------
+
   Widget _buildDialer() {
     bool isCallActive =
         _currentCallState != null &&
@@ -298,8 +305,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   textAlign: TextAlign.center,
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
-                    hintText: 'Enter number',
-                    border: OutlineInputBorder(),
+                    hintText: '',
+
+                    // border: OutlineInputBorder(),
                   ),
                 ),
               ),
@@ -312,36 +320,46 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   backgroundColor: Colors.grey[200],
                 ),
               const SizedBox(height: 20),
-              // Numeric keypad
+              // Numeric keypad with proper spacing
               Column(
                 children: [
+                  // Row 1: 1 2 3
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      '1',
-                      '2',
-                      '3',
-                    ].map((digit) => _dialButton(digit)).toList(),
+                      _dialButton('1'),
+                      const SizedBox(width: 20),
+                      _dialButton('2'),
+                      const SizedBox(width: 20),
+                      _dialButton('3'),
+                    ],
                   ),
                   const SizedBox(height: 16),
+                  // Row 2: 4 5 6
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      '4',
-                      '5',
-                      '6',
-                    ].map((digit) => _dialButton(digit)).toList(),
+                      _dialButton('4'),
+                      const SizedBox(width: 20),
+                      _dialButton('5'),
+                      const SizedBox(width: 20),
+                      _dialButton('6'),
+                    ],
                   ),
                   const SizedBox(height: 16),
+                  // Row 3: 7 8 9
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      '7',
-                      '8',
-                      '9',
-                    ].map((digit) => _dialButton(digit)).toList(),
+                      _dialButton('7'),
+                      const SizedBox(width: 20),
+                      _dialButton('8'),
+                      const SizedBox(width: 20),
+                      _dialButton('9'),
+                    ],
                   ),
                   const SizedBox(height: 16),
+                  // Row 4: * 0 #
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -366,6 +384,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     child: ElevatedButton.icon(
                       onPressed: isCallActive ? _hangUp : _makeCall,
                       icon: Icon(isCallActive ? Icons.call_end : Icons.call),
+                      // label: Text(isCallActive ? '' : ''),
                       label: Text(isCallActive ? 'Hang Up' : 'Call'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: isCallActive
@@ -513,7 +532,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Number 6 Softphone'),
+        title: const Text(''),
         actions: [
           if (_isRegistered)
             IconButton(
