@@ -86,8 +86,30 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   // ----------------------------------------------------------------------
   // Core logic – identical to old working code
   // ----------------------------------------------------------------------
+  // Future<void> _initAndSetup() async {
+  //   await _requestPermissions();
+  //   _linphonePlugin.addCallStateListener().listen((dynamic state) {
+  //     final callState = _convertCallState(state);
+  //     setState(() => _currentCallState = callState);
+  //     _log('Call state changed: $callState');
+
+  //     if (callState == CallState.IncomingReceived) {
+  //       _showIncomingCallDialog();
+  //     }
+
+  //     // Optional: add call log when call ends (Connected -> End)
+  //     if (callState == CallState.End &&
+  //         _currentCallState == CallState.Connected) {
+  //       // We don't have duration easily, so just log a simple entry
+  //       _addCallLog(_dialNumberController.text.trim(), 'Outgoing');
+  //     }
+  //   });
+  // }
+
   Future<void> _initAndSetup() async {
     await _requestPermissions();
+
+    // Listen to call state changes (already present)
     _linphonePlugin.addCallStateListener().listen((dynamic state) {
       final callState = _convertCallState(state);
       setState(() => _currentCallState = callState);
@@ -97,11 +119,30 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         _showIncomingCallDialog();
       }
 
-      // Optional: add call log when call ends (Connected -> End)
       if (callState == CallState.End &&
           _currentCallState == CallState.Connected) {
-        // We don't have duration easily, so just log a simple entry
         _addCallLog(_dialNumberController.text.trim(), 'Outgoing');
+      }
+    });
+
+    // NEW: Listen to registration state changes
+    _linphonePlugin.addRegistrationStateListener().listen((dynamic event) {
+      _log('Registration event: $event');
+      final eventStr = event.toString();
+      if (eventStr.contains('Login success') || eventStr.contains('Ok')) {
+        setState(() {
+          _registrationState = RegistrationState.Ok;
+          _isRegistered = true;
+          _debugMessage = 'Registration confirmed';
+        });
+        _log('Registration successful');
+      } else if (eventStr.contains('Failed')) {
+        setState(() {
+          _registrationState = RegistrationState.Failed;
+          _isRegistered = false;
+          _debugMessage = 'Registration failed: $eventStr';
+        });
+        _log('Registration failed');
       }
     });
   }
@@ -169,6 +210,52 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     }
   }
 
+  // Future<void> _login() async {
+  //   final username = _sipUsernameController.text.trim();
+  //   final password = _sipPasswordController.text.trim();
+  //   final domain = _sipDomainController.text.trim();
+
+  //   if (username.isEmpty || password.isEmpty || domain.isEmpty) {
+  //     _log('Please fill all fields');
+  //     return;
+  //   }
+
+  //   setState(() {
+  //     _registrationState = RegistrationState.Progress;
+  //     _isRegistered = false;
+  //     _debugMessage = 'Attempting SIP registration...';
+  //   });
+  //   _log('Attempting SIP registration...');
+
+  //   try {
+  //     await _linphonePlugin.login(
+  //       userName: username,
+  //       domain: domain,
+  //       password: password,
+  //     );
+
+  //     // Wait 5 seconds to give the server time to respond
+  //     await Future.delayed(const Duration(seconds: 5));
+
+  //     // If no exception, assume success (plugin doesn't expose real registration state)
+  //     setState(() {
+  //       _registrationState = RegistrationState.Ok;
+  //       _isRegistered = true;
+  //       _debugMessage = 'Registration successful (assumed)';
+  //     });
+  //     _log('Registration assumed successful (no error thrown)');
+  //   } catch (e) {
+  //     setState(() {
+  //       _registrationState = RegistrationState.Failed;
+  //       _isRegistered = false;
+  //       _debugMessage = 'Registration error: ${e.toString()}';
+  //     });
+  //     _log('Registration failed: $e');
+  //   }
+  // }
+
+  // REGISTRATION WITH FEEDBACK
+
   Future<void> _login() async {
     final username = _sipUsernameController.text.trim();
     final password = _sipPasswordController.text.trim();
@@ -192,17 +279,18 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         domain: domain,
         password: password,
       );
-
-      // Wait 5 seconds to give the server time to respond
-      await Future.delayed(const Duration(seconds: 5));
-
-      // If no exception, assume success (plugin doesn't expose real registration state)
-      setState(() {
-        _registrationState = RegistrationState.Ok;
-        _isRegistered = true;
-        _debugMessage = 'Registration successful (assumed)';
+      _log('Login method returned, waiting for registration event...');
+      // Timeout fallback – if no event after 15 seconds, mark as failed
+      Future.delayed(const Duration(seconds: 15), () {
+        if (_registrationState == RegistrationState.Progress) {
+          setState(() {
+            _registrationState = RegistrationState.Failed;
+            _isRegistered = false;
+            _debugMessage = 'Registration timeout (no response)';
+          });
+          _log('Registration timeout');
+        }
       });
-      _log('Registration assumed successful (no error thrown)');
     } catch (e) {
       setState(() {
         _registrationState = RegistrationState.Failed;

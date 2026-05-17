@@ -136,6 +136,7 @@ public void login(String userName, String domain, String password) {
 
     // Better transport for office WiFi
     TransportType transportType = TransportType.Tcp;
+    // TransportType transportType = TransportType.Tls;
 
     // Disable problematic IPv6
     core.setIpv6Enabled(false);
