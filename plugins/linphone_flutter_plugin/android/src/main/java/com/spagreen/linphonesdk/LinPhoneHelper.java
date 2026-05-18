@@ -135,8 +135,10 @@ public void login(String userName, String domain, String password) {
     core = factory.createCore(null, null, context);
 
     // Better transport for office WiFi
-    TransportType transportType = TransportType.Tcp;
+    // TransportType transportType = TransportType.Tcp;
     // TransportType transportType = TransportType.Tls;
+    TransportType transportType = TransportType.Udp;
+
 
     // Disable problematic IPv6
     core.setIpv6Enabled(false);
