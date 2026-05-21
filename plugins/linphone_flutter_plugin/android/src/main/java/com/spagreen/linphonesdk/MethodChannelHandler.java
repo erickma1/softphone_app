@@ -102,6 +102,10 @@ public class MethodChannelHandler extends FlutterActivity implements MethodChann
                     result.error(null, e.toString(), null);
                 }
                 break;
+            // case "answerCall":
+            //     linPhoneHelper.answerCall();
+            //     result.success(true);
+            //     break;
             case "answerCall":
                 linPhoneHelper.answerCall();
                 result.success(true);
