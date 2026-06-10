@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:linphone_flutter_plugin/linphoneflutterplugin.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 
 void main() {
   runApp(const MySoftphoneApp());
@@ -45,7 +46,6 @@ class CallLogEntry {
 }
 
 enum RegistrationState { None, Progress, Ok, Failed }
-
 enum CallState {
   Idle,
   IncomingReceived,
@@ -66,8 +66,9 @@ class SoftphoneHomePage extends StatefulWidget {
 
 class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final LinphoneFlutterPlugin _linphonePlugin = LinphoneFlutterPlugin();
-  int _selectedIndex = 0;
+  int _selectedIndex = 0; // 0: Dialer, 1: Contacts, 2: Call Log, 3: Settings
 
+  // SIP settings
   final _sipUsernameController = TextEditingController();
   final _sipPasswordController = TextEditingController();
   final _sipDomainController = TextEditingController();
@@ -79,11 +80,18 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   CallState? _currentCallState;
   String _debugMessage = '';
 
+  // Call tracking
   DateTime? _callStartTime;
   int _callDuration = 0;
   String? _currentCallNumber;
   List<CallLogEntry> _callLogs = [];
   bool _isOutgoingCall = false;
+
+  // Contacts
+  List<Contact> _contacts = [];
+  List<Contact> _filteredContacts = [];
+  final TextEditingController _searchController = TextEditingController();
+  Future<List<Contact>>? _contactsFuture; // nullable, initialized in initState
 
   @override
   void initState() {
@@ -92,6 +100,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     _dialNumberController.addListener(() {
       if (mounted) setState(() {});
     });
+    _searchController.addListener(_filterContacts);
+    // Initialize contacts future once
+    _contactsFuture = _autoLoadContacts();
   }
 
   Future<void> _initAndSetup() async {
@@ -141,8 +152,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   }
 
   void _handleCallEnd() {
-    String numberToLog =
-        _currentCallNumber ?? _dialNumberController.text.trim();
+    String numberToLog = _currentCallNumber ?? _dialNumberController.text.trim();
     if (numberToLog.isEmpty || numberToLog == 'Incoming call')
       numberToLog = 'Unknown';
 
@@ -358,10 +368,37 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     return CallState.Idle;
   }
 
-  // UI Components
+  // ---------- Contacts methods ----------
+  void _filterContacts() {
+    final query = _searchController.text.trim().toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredContacts = List.from(_contacts);
+      } else {
+        _filteredContacts = _contacts.where((contact) {
+          final name = contact.displayName.toLowerCase();
+          final phones = contact.phones.map((p) => p.number).join(' ').toLowerCase();
+          return name.contains(query) || phones.contains(query);
+        }).toList();
+      }
+    });
+  }
+
+  Future<List<Contact>> _autoLoadContacts() async {
+    final status = await Permission.contacts.status;
+    if (!status.isGranted) {
+      final granted = await Permission.contacts.request();
+      if (!granted.isGranted) {
+        throw Exception('Contacts permission denied');
+      }
+    }
+    final contacts = await FlutterContacts.getContacts(withProperties: true);
+    return contacts;
+  }
+
+  // ---------- UI Components ----------
   Widget _buildDialer() {
-    bool isCallActive =
-        _currentCallState != null &&
+    bool isCallActive = _currentCallState != null &&
         _currentCallState != CallState.Idle &&
         _currentCallState != CallState.End &&
         _currentCallState != CallState.Error;
@@ -376,10 +413,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               children: [
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 20,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(16),
@@ -389,10 +423,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     children: [
                       TextField(
                         controller: _dialNumberController,
-                        style: const TextStyle(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
                         textAlign: TextAlign.center,
                         keyboardType: TextInputType.phone,
                         decoration: const InputDecoration(
@@ -401,14 +432,11 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
-                      if (_currentCallState != null &&
-                          _currentCallState != CallState.Idle)
+                      if (_currentCallState != null && _currentCallState != CallState.Idle)
                         Padding(
                           padding: const EdgeInsets.only(top: 12),
                           child: Chip(
-                            label: Text(
-                              _currentCallState.toString().split('.').last,
-                            ),
+                            label: Text(_currentCallState.toString().split('.').last),
                             backgroundColor: _getCallStateColor(),
                             labelStyle: const TextStyle(color: Colors.white),
                           ),
@@ -421,46 +449,33 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Column(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('1', ''),
-                          _circularDialButton('2', 'ABC'),
-                          _circularDialButton('3', 'DEF'),
-                        ],
-                      ),
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                        _circularDialButton('1', ''),
+                        _circularDialButton('2', 'ABC'),
+                        _circularDialButton('3', 'DEF'),
+                      ]),
                       const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('4', 'GHI'),
-                          _circularDialButton('5', 'JKL'),
-                          _circularDialButton('6', 'MNO'),
-                        ],
-                      ),
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                        _circularDialButton('4', 'GHI'),
+                        _circularDialButton('5', 'JKL'),
+                        _circularDialButton('6', 'MNO'),
+                      ]),
                       const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('7', 'PQRS'),
-                          _circularDialButton('8', 'TUV'),
-                          _circularDialButton('9', 'WXYZ'),
-                        ],
-                      ),
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                        _circularDialButton('7', 'PQRS'),
+                        _circularDialButton('8', 'TUV'),
+                        _circularDialButton('9', 'WXYZ'),
+                      ]),
                       const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('*', ''),
-                          _circularDialButton('0', '+'),
-                          _circularDialButton('#', ''),
-                        ],
-                      ),
+                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                        _circularDialButton('*', ''),
+                        _circularDialButton('0', '+'),
+                        _circularDialButton('#', ''),
+                      ]),
                     ],
                   ),
                 ),
                 const SizedBox(height: 30),
-                // Action buttons: Speaker (left), Call (center), Backspace (right)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -476,20 +491,14 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     FloatingActionButton(
                       onPressed: isCallActive ? _hangUp : _makeCall,
                       backgroundColor: isCallActive ? Colors.red : Colors.green,
-                      child: Icon(
-                        isCallActive ? Icons.call_end : Icons.call,
-                        size: 32,
-                      ),
+                      child: Icon(isCallActive ? Icons.call_end : Icons.call, size: 32),
                     ),
                     if (hasText)
                       FloatingActionButton.extended(
                         onPressed: () {
                           final text = _dialNumberController.text;
                           if (text.isNotEmpty) {
-                            _dialNumberController.text = text.substring(
-                              0,
-                              text.length - 1,
-                            );
+                            _dialNumberController.text = text.substring(0, text.length - 1);
                           }
                         },
                         icon: const Icon(Icons.backspace),
@@ -527,18 +536,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  digit,
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                Text(digit, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
                 if (letters.isNotEmpty)
-                  Text(
-                    letters,
-                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                  ),
+                  Text(letters, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
               ],
             ),
           ),
@@ -562,6 +562,118 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     }
   }
 
+  // ---------- Contacts Tab (auto‑load, no late error) ----------
+  Widget _buildContacts() {
+    if (_contactsFuture == null) {
+      // Fallback – should not happen because initState sets it
+      return const Center(child: Text('Error loading contacts'));
+    }
+    return FutureBuilder<List<Contact>>(
+      future: _contactsFuture!,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error, size: 48, color: Colors.red),
+                const SizedBox(height: 16),
+                Text('Error: ${snapshot.error}', textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _contactsFuture = _autoLoadContacts();
+                    });
+                  },
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+        final contacts = snapshot.data ?? [];
+        // Update internal lists only once when data arrives
+        if (_contacts != contacts) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            setState(() {
+              _contacts = contacts;
+              _filteredContacts = contacts;
+            });
+          });
+        }
+        return _buildContactListWithSearch();
+      },
+    );
+  }
+
+  Widget _buildContactListWithSearch() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search by name or number',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        _filterContacts();
+                      },
+                    )
+                  : null,
+            ),
+          ),
+        ),
+        Expanded(
+          child: _contacts.isEmpty
+              ? const Center(child: Text('No contacts found'))
+              : (_filteredContacts.isEmpty && _searchController.text.isNotEmpty)
+                  ? Center(child: Text('No contacts match "${_searchController.text}"'))
+                  : ListView.builder(
+                      itemCount: _filteredContacts.length,
+                      itemBuilder: (context, index) {
+                        final contact = _filteredContacts[index];
+                        final hasNumber = contact.phones.isNotEmpty;
+                        final phoneNumber = hasNumber ? contact.phones.first.number : '';
+                        return ListTile(
+                          leading: CircleAvatar(
+                            child: Text(contact.displayName.isNotEmpty ? contact.displayName[0].toUpperCase() : '?'),
+                          ),
+                          title: Text(contact.displayName),
+                          subtitle: hasNumber ? Text(phoneNumber) : const Text('No number'),
+                          trailing: hasNumber
+                              ? IconButton(
+                                  icon: const Icon(Icons.call, color: Colors.green),
+                                  onPressed: () {
+                                    _dialNumberController.text = phoneNumber;
+                                    setState(() => _selectedIndex = 0);
+                                  },
+                                )
+                              : null,
+                          onTap: hasNumber
+                              ? () {
+                                  _dialNumberController.text = phoneNumber;
+                                  setState(() => _selectedIndex = 0);
+                                }
+                              : null,
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+
+  // ---------- Call Log Tab ----------
   Widget _buildCallLog() {
     if (_callLogs.isEmpty) {
       return Center(
@@ -594,15 +706,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                 shape: BoxShape.circle,
                 color: _getCallLogIconColor(log.status).withOpacity(0.2),
               ),
-              child: Icon(
-                _getCallLogIcon(log.status),
-                color: _getCallLogIconColor(log.status),
-              ),
+              child: Icon(_getCallLogIcon(log.status), color: _getCallLogIconColor(log.status)),
             ),
-            title: Text(
-              log.number,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
+            title: Text(log.number, style: const TextStyle(fontWeight: FontWeight.w600)),
             subtitle: Text(
               '${log.status} • ${_formatDateTime(log.date)}${durationStr.isNotEmpty ? ' • $durationStr' : ''}',
               style: TextStyle(color: Colors.grey[600], fontSize: 12),
@@ -658,6 +764,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
+  // ---------- Settings Tab ----------
   Widget _buildSettings() {
     return SingleChildScrollView(
       child: Padding(
@@ -665,18 +772,13 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'SIP Configuration',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            const Text('SIP Configuration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             TextField(
               controller: _sipUsernameController,
               decoration: InputDecoration(
                 labelText: 'SIP Username',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 prefixIcon: const Icon(Icons.person),
               ),
             ),
@@ -685,9 +787,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               controller: _sipPasswordController,
               decoration: InputDecoration(
                 labelText: 'Password',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 prefixIcon: const Icon(Icons.lock),
               ),
               obscureText: true,
@@ -697,9 +797,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               controller: _sipDomainController,
               decoration: InputDecoration(
                 labelText: 'Domain (e.g., sip.example.com)',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 prefixIcon: const Icon(Icons.domain),
               ),
             ),
@@ -712,19 +810,12 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                       onPressed: _isRegistered ? _logout : _login,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: _isRegistered
-                            ? Colors.red
-                            : Colors.green,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                        backgroundColor: _isRegistered ? Colors.red : Colors.green,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                       child: Text(
                         _isRegistered ? 'Logout' : 'Register',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                       ),
                     ),
             ),
@@ -742,15 +833,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     children: const [
                       Icon(Icons.check_circle, color: Colors.green),
                       SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Successfully registered',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
+                      Expanded(child: Text('Successfully registered', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w500))),
                     ],
                   ),
                 ),
@@ -769,25 +852,14 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     children: [
                       const Icon(Icons.error_outline, color: Colors.red),
                       const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Registration failed: $_registrationError',
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
+                      Expanded(child: Text('Registration failed: $_registrationError', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500))),
                     ],
                   ),
                 ),
               ),
             const SizedBox(height: 32),
             const Divider(),
-            const Text(
-              'Debug Log',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+            const Text('Debug Log', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(12),
@@ -825,23 +897,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               child: Center(
                 child: Row(
                   children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Colors.green,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
+                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
                     const SizedBox(width: 6),
-                    const Text(
-                      'Online',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.green,
-                      ),
-                    ),
+                    const Text('Online', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.green)),
                   ],
                 ),
               ),
@@ -850,18 +908,22 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
       ),
       body: IndexedStack(
         index: _selectedIndex,
-        children: [_buildDialer(), _buildCallLog(), _buildSettings()],
+        children: [
+          _buildDialer(),
+          _buildContacts(),
+          _buildCallLog(),
+          _buildSettings(),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
+          BottomNavigationBarItem(icon: Icon(Icons.contacts), label: 'Contacts'),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Call Log'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
@@ -873,6 +935,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     _sipPasswordController.dispose();
     _sipDomainController.dispose();
     _dialNumberController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 }
