@@ -17,6 +17,9 @@ dependencies:
     sdk: flutter
 
   # linphone_flutter_plugin: ^0.0.2
+  http: ^1.1.0
+  shared_preferences: ^2.2.0
+
   linphone_flutter_plugin:
     path: plugins/linphone_flutter_plugin
 

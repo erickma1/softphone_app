@@ -3,7 +3,13 @@ import 'package:linphone_flutter_plugin/linphoneflutterplugin.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 
-void main() {
+// Import your actual auth screens and service (these exist in separate files)
+import 'screens/login_screen.dart';
+import 'screens/register_screen.dart';
+import 'services/auth_service.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MySoftphoneApp());
 }
 
@@ -15,11 +21,63 @@ class MySoftphoneApp extends StatelessWidget {
     return MaterialApp(
       title: 'Number 6 Softphone',
       theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
-      home: const SoftphoneHomePage(),
+      home: const SplashScreen(),
+      routes: {
+        '/login': (_) => const LoginScreen(),
+        '/register': (_) => const RegisterScreen(),
+        '/home': (_) => const SoftphoneHomePage(),
+      },
     );
   }
 }
 
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    final auth = AuthService();
+    final token = await auth.getToken();
+    await Future.delayed(const Duration(seconds: 1));
+    if (mounted) {
+      if (token != null) {
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.phone, size: 64, color: Colors.blue[600]),
+            const SizedBox(height: 16),
+            const Text('Number 6 Softphone'),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --------------------- Softphone Models & Enums ---------------------
 class CallLogEntry {
   final String number;
   final String status;
@@ -46,6 +104,7 @@ class CallLogEntry {
 }
 
 enum RegistrationState { None, Progress, Ok, Failed }
+
 enum CallState {
   Idle,
   IncomingReceived,
@@ -57,6 +116,7 @@ enum CallState {
   Error,
 }
 
+// --------------------- Main Softphone Home Page ---------------------
 class SoftphoneHomePage extends StatefulWidget {
   const SoftphoneHomePage({super.key});
 
@@ -91,7 +151,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   List<Contact> _contacts = [];
   List<Contact> _filteredContacts = [];
   final TextEditingController _searchController = TextEditingController();
-  Future<List<Contact>>? _contactsFuture; // nullable, initialized in initState
+  Future<List<Contact>>? _contactsFuture;
 
   @override
   void initState() {
@@ -101,7 +161,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
       if (mounted) setState(() {});
     });
     _searchController.addListener(_filterContacts);
-    // Initialize contacts future once
     _contactsFuture = _autoLoadContacts();
   }
 
@@ -152,7 +211,8 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   }
 
   void _handleCallEnd() {
-    String numberToLog = _currentCallNumber ?? _dialNumberController.text.trim();
+    String numberToLog =
+        _currentCallNumber ?? _dialNumberController.text.trim();
     if (numberToLog.isEmpty || numberToLog == 'Incoming call')
       numberToLog = 'Unknown';
 
@@ -377,7 +437,10 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
       } else {
         _filteredContacts = _contacts.where((contact) {
           final name = contact.displayName.toLowerCase();
-          final phones = contact.phones.map((p) => p.number).join(' ').toLowerCase();
+          final phones = contact.phones
+              .map((p) => p.number)
+              .join(' ')
+              .toLowerCase();
           return name.contains(query) || phones.contains(query);
         }).toList();
       }
@@ -398,7 +461,8 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
   // ---------- UI Components ----------
   Widget _buildDialer() {
-    bool isCallActive = _currentCallState != null &&
+    bool isCallActive =
+        _currentCallState != null &&
         _currentCallState != CallState.Idle &&
         _currentCallState != CallState.End &&
         _currentCallState != CallState.Error;
@@ -413,7 +477,10 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               children: [
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 16),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 20,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(16),
@@ -423,7 +490,10 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     children: [
                       TextField(
                         controller: _dialNumberController,
-                        style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.bold,
+                        ),
                         textAlign: TextAlign.center,
                         keyboardType: TextInputType.phone,
                         decoration: const InputDecoration(
@@ -432,11 +502,14 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
-                      if (_currentCallState != null && _currentCallState != CallState.Idle)
+                      if (_currentCallState != null &&
+                          _currentCallState != CallState.Idle)
                         Padding(
                           padding: const EdgeInsets.only(top: 12),
                           child: Chip(
-                            label: Text(_currentCallState.toString().split('.').last),
+                            label: Text(
+                              _currentCallState.toString().split('.').last,
+                            ),
                             backgroundColor: _getCallStateColor(),
                             labelStyle: const TextStyle(color: Colors.white),
                           ),
@@ -449,29 +522,41 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Column(
                     children: [
-                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                        _circularDialButton('1', ''),
-                        _circularDialButton('2', 'ABC'),
-                        _circularDialButton('3', 'DEF'),
-                      ]),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _circularDialButton('1', ''),
+                          _circularDialButton('2', 'ABC'),
+                          _circularDialButton('3', 'DEF'),
+                        ],
+                      ),
                       const SizedBox(height: 16),
-                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                        _circularDialButton('4', 'GHI'),
-                        _circularDialButton('5', 'JKL'),
-                        _circularDialButton('6', 'MNO'),
-                      ]),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _circularDialButton('4', 'GHI'),
+                          _circularDialButton('5', 'JKL'),
+                          _circularDialButton('6', 'MNO'),
+                        ],
+                      ),
                       const SizedBox(height: 16),
-                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                        _circularDialButton('7', 'PQRS'),
-                        _circularDialButton('8', 'TUV'),
-                        _circularDialButton('9', 'WXYZ'),
-                      ]),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _circularDialButton('7', 'PQRS'),
+                          _circularDialButton('8', 'TUV'),
+                          _circularDialButton('9', 'WXYZ'),
+                        ],
+                      ),
                       const SizedBox(height: 16),
-                      Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                        _circularDialButton('*', ''),
-                        _circularDialButton('0', '+'),
-                        _circularDialButton('#', ''),
-                      ]),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _circularDialButton('*', ''),
+                          _circularDialButton('0', '+'),
+                          _circularDialButton('#', ''),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -491,14 +576,20 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     FloatingActionButton(
                       onPressed: isCallActive ? _hangUp : _makeCall,
                       backgroundColor: isCallActive ? Colors.red : Colors.green,
-                      child: Icon(isCallActive ? Icons.call_end : Icons.call, size: 32),
+                      child: Icon(
+                        isCallActive ? Icons.call_end : Icons.call,
+                        size: 32,
+                      ),
                     ),
                     if (hasText)
                       FloatingActionButton.extended(
                         onPressed: () {
                           final text = _dialNumberController.text;
                           if (text.isNotEmpty) {
-                            _dialNumberController.text = text.substring(0, text.length - 1);
+                            _dialNumberController.text = text.substring(
+                              0,
+                              text.length - 1,
+                            );
                           }
                         },
                         icon: const Icon(Icons.backspace),
@@ -536,9 +627,18 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(digit, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+                Text(
+                  digit,
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
                 if (letters.isNotEmpty)
-                  Text(letters, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                  Text(
+                    letters,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                  ),
               ],
             ),
           ),
@@ -562,10 +662,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     }
   }
 
-  // ---------- Contacts Tab (auto‑load, no late error) ----------
+  // ---------- Contacts Tab ----------
   Widget _buildContacts() {
     if (_contactsFuture == null) {
-      // Fallback – should not happen because initState sets it
       return const Center(child: Text('Error loading contacts'));
     }
     return FutureBuilder<List<Contact>>(
@@ -596,7 +695,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
           );
         }
         final contacts = snapshot.data ?? [];
-        // Update internal lists only once when data arrives
         if (_contacts != contacts) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             setState(() {
@@ -620,7 +718,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
             decoration: InputDecoration(
               hintText: 'Search by name or number',
               prefixIcon: const Icon(Icons.search),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear),
@@ -637,37 +737,47 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
           child: _contacts.isEmpty
               ? const Center(child: Text('No contacts found'))
               : (_filteredContacts.isEmpty && _searchController.text.isNotEmpty)
-                  ? Center(child: Text('No contacts match "${_searchController.text}"'))
-                  : ListView.builder(
-                      itemCount: _filteredContacts.length,
-                      itemBuilder: (context, index) {
-                        final contact = _filteredContacts[index];
-                        final hasNumber = contact.phones.isNotEmpty;
-                        final phoneNumber = hasNumber ? contact.phones.first.number : '';
-                        return ListTile(
-                          leading: CircleAvatar(
-                            child: Text(contact.displayName.isNotEmpty ? contact.displayName[0].toUpperCase() : '?'),
-                          ),
-                          title: Text(contact.displayName),
-                          subtitle: hasNumber ? Text(phoneNumber) : const Text('No number'),
-                          trailing: hasNumber
-                              ? IconButton(
-                                  icon: const Icon(Icons.call, color: Colors.green),
-                                  onPressed: () {
-                                    _dialNumberController.text = phoneNumber;
-                                    setState(() => _selectedIndex = 0);
-                                  },
-                                )
-                              : null,
-                          onTap: hasNumber
-                              ? () {
-                                  _dialNumberController.text = phoneNumber;
-                                  setState(() => _selectedIndex = 0);
-                                }
-                              : null,
-                        );
-                      },
-                    ),
+              ? Center(
+                  child: Text('No contacts match "${_searchController.text}"'),
+                )
+              : ListView.builder(
+                  itemCount: _filteredContacts.length,
+                  itemBuilder: (context, index) {
+                    final contact = _filteredContacts[index];
+                    final hasNumber = contact.phones.isNotEmpty;
+                    final phoneNumber = hasNumber
+                        ? contact.phones.first.number
+                        : '';
+                    return ListTile(
+                      leading: CircleAvatar(
+                        child: Text(
+                          contact.displayName.isNotEmpty
+                              ? contact.displayName[0].toUpperCase()
+                              : '?',
+                        ),
+                      ),
+                      title: Text(contact.displayName),
+                      subtitle: hasNumber
+                          ? Text(phoneNumber)
+                          : const Text('No number'),
+                      trailing: hasNumber
+                          ? IconButton(
+                              icon: const Icon(Icons.call, color: Colors.green),
+                              onPressed: () {
+                                _dialNumberController.text = phoneNumber;
+                                setState(() => _selectedIndex = 0);
+                              },
+                            )
+                          : null,
+                      onTap: hasNumber
+                          ? () {
+                              _dialNumberController.text = phoneNumber;
+                              setState(() => _selectedIndex = 0);
+                            }
+                          : null,
+                    );
+                  },
+                ),
         ),
       ],
     );
@@ -706,9 +816,15 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                 shape: BoxShape.circle,
                 color: _getCallLogIconColor(log.status).withOpacity(0.2),
               ),
-              child: Icon(_getCallLogIcon(log.status), color: _getCallLogIconColor(log.status)),
+              child: Icon(
+                _getCallLogIcon(log.status),
+                color: _getCallLogIconColor(log.status),
+              ),
             ),
-            title: Text(log.number, style: const TextStyle(fontWeight: FontWeight.w600)),
+            title: Text(
+              log.number,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
             subtitle: Text(
               '${log.status} • ${_formatDateTime(log.date)}${durationStr.isNotEmpty ? ' • $durationStr' : ''}',
               style: TextStyle(color: Colors.grey[600], fontSize: 12),
@@ -772,13 +888,18 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('SIP Configuration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'SIP Configuration',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: _sipUsernameController,
               decoration: InputDecoration(
                 labelText: 'SIP Username',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 prefixIcon: const Icon(Icons.person),
               ),
             ),
@@ -787,7 +908,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               controller: _sipPasswordController,
               decoration: InputDecoration(
                 labelText: 'Password',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 prefixIcon: const Icon(Icons.lock),
               ),
               obscureText: true,
@@ -797,7 +920,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               controller: _sipDomainController,
               decoration: InputDecoration(
                 labelText: 'Domain (e.g., sip.example.com)',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 prefixIcon: const Icon(Icons.domain),
               ),
             ),
@@ -810,12 +935,19 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                       onPressed: _isRegistered ? _logout : _login,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: _isRegistered ? Colors.red : Colors.green,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        backgroundColor: _isRegistered
+                            ? Colors.red
+                            : Colors.green,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                       child: Text(
-                        _isRegistered ? 'Logout' : 'Register',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        _isRegistered ? 'Logout SIP' : 'Register SIP',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
             ),
@@ -833,7 +965,15 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     children: const [
                       Icon(Icons.check_circle, color: Colors.green),
                       SizedBox(width: 8),
-                      Expanded(child: Text('Successfully registered', style: TextStyle(color: Colors.green, fontWeight: FontWeight.w500))),
+                      Expanded(
+                        child: Text(
+                          'Successfully registered',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -852,14 +992,52 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     children: [
                       const Icon(Icons.error_outline, color: Colors.red),
                       const SizedBox(width: 8),
-                      Expanded(child: Text('Registration failed: $_registrationError', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w500))),
+                      Expanded(
+                        child: Text(
+                          'Registration failed: $_registrationError',
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
             const SizedBox(height: 32),
             const Divider(),
-            const Text('Debug Log', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'App Account',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  final auth = AuthService();
+                  await auth.clearToken();
+                  if (mounted) {
+                    Navigator.pushReplacementNamed(context, '/login');
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: const Text(
+                  'Logout from App',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+            const Divider(),
+            const Text(
+              'Debug Log',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(12),
@@ -897,9 +1075,23 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               child: Center(
                 child: Row(
                   children: [
-                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                     const SizedBox(width: 6),
-                    const Text('Online', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.green)),
+                    const Text(
+                      'Online',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -921,9 +1113,15 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
-          BottomNavigationBarItem(icon: Icon(Icons.contacts), label: 'Contacts'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.contacts),
+            label: 'Contacts',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Call Log'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
         ],
       ),
     );
