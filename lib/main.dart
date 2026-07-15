@@ -126,7 +126,8 @@ class SoftphoneHomePage extends StatefulWidget {
 
 class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final LinphoneFlutterPlugin _linphonePlugin = LinphoneFlutterPlugin();
-  int _selectedIndex = 0; // 0: Dialer, 1: Contacts, 2: Call Log, 3: Settings
+  // int _selectedIndex = 0; // 0: Dialer, 1: Contacts, 2: Call Log, 3: Settings
+  int _selectedIndex = 0;
 
   // SIP settings
   final _sipUsernameController = TextEditingController();
@@ -153,6 +154,17 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final TextEditingController _searchController = TextEditingController();
   Future<List<Contact>>? _contactsFuture;
 
+  // Wallet and server CDRs
+  Map<String, dynamic>? _walletBalance;
+  List<dynamic> _topups = [];
+  List<dynamic> _serverCdrs = [];
+
+  bool _walletLoading = false;
+  bool _historyLoading = false;
+
+  String? _walletError;
+  String? _historyError;
+
   Future<void> _loadSavedSipDetails() async {
     final auth = AuthService();
     final sip = await auth.getSipDetails();
@@ -178,6 +190,8 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     super.initState();
     _initAndSetup();
     _loadSavedSipDetails();
+    _loadWalletData();
+    _loadServerCdrs();
     _dialNumberController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -266,6 +280,13 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     _callStartTime = null;
     _callDuration = 0;
     _currentCallNumber = null;
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        _loadWalletData();
+        _loadServerCdrs();
+      }
+    });
   }
 
   void _addCallLog(String number, String status, int duration, bool answered) {
@@ -478,6 +499,401 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     }
     final contacts = await FlutterContacts.getContacts(withProperties: true);
     return contacts;
+  }
+
+  Future<void> _loadWalletData() async {
+    if (!mounted) return;
+
+    setState(() {
+      _walletLoading = true;
+      _walletError = null;
+    });
+
+    try {
+      final balanceResult = await AuthService.getBalance();
+      final topupsResult = await AuthService.getTopups();
+
+      if (!mounted) return;
+
+      setState(() {
+        if (balanceResult['success'] == true) {
+          _walletBalance = Map<String, dynamic>.from(balanceResult['balance']);
+        } else {
+          _walletError = balanceResult['message'] ?? 'Could not load balance';
+        }
+
+        if (topupsResult['success'] == true) {
+          _topups = List<dynamic>.from(topupsResult['topups']);
+        }
+
+        _walletLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _walletLoading = false;
+        _walletError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _loadServerCdrs() async {
+    if (!mounted) return;
+
+    setState(() {
+      _historyLoading = true;
+      _historyError = null;
+    });
+
+    try {
+      final result = await AuthService.getCdrs();
+
+      if (!mounted) return;
+
+      setState(() {
+        if (result['success'] == true) {
+          _serverCdrs = List<dynamic>.from(result['cdrs']);
+        } else {
+          _historyError = result['message'] ?? 'Could not load call history';
+        }
+
+        _historyLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _historyLoading = false;
+        _historyError = e.toString();
+      });
+    }
+  }
+
+  String _formatDurationFromSeconds(dynamic value) {
+    final seconds = int.tryParse(value?.toString() ?? '0') ?? 0;
+
+    if (seconds <= 0) return '0s';
+
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+
+    if (minutes == 0) return '${remainingSeconds}s';
+    if (remainingSeconds == 0) return '${minutes}m';
+
+    return '${minutes}m ${remainingSeconds}s';
+  }
+
+  String _formatServerDate(dynamic value) {
+    if (value == null) return '';
+
+    final parsed = DateTime.tryParse(value.toString());
+    if (parsed == null) return value.toString();
+
+    return _formatDateTime(parsed.toLocal());
+  }
+
+  String _moneyText(dynamic amount, dynamic currency) {
+    final a = amount?.toString() ?? '0';
+    final c = currency?.toString().toUpperCase() ?? 'USD';
+
+    return '$c $a';
+  }
+
+  void _showTopUpDialog() {
+    final amountController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Top Up Wallet'),
+          content: TextField(
+            controller: amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Amount',
+              hintText: 'Example: 10',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final amount = amountController.text.trim();
+
+                if (amount.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter an amount'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                Navigator.pop(dialogContext);
+
+                final result = await AuthService.createCheckoutSession(
+                  amount: amount,
+                );
+
+                if (!mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(result['message'] ?? 'Top-up request sent'),
+                    backgroundColor: result['success'] == true
+                        ? Colors.green
+                        : Colors.orange,
+                  ),
+                );
+
+                await _loadWalletData();
+              },
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildWallet() {
+    final amount = _walletBalance?['amount']?.toString() ?? '0';
+    final currency =
+        _walletBalance?['currency']?.toString().toUpperCase() ?? 'USD';
+
+    return RefreshIndicator(
+      onRefresh: _loadWalletData,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.blue[700],
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Current Balance',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '$currency $amount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 36,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _showTopUpDialog,
+                    icon: const Icon(Icons.add_card),
+                    label: const Text('Top Up'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.blue,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          if (_walletLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+
+          if (_walletError != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.red),
+              ),
+              child: Text(
+                _walletError!,
+                style: const TextStyle(color: Colors.red),
+              ),
+            ),
+
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Top-up History',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              IconButton(
+                onPressed: _loadWalletData,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+
+          if (_topups.isEmpty && !_walletLoading)
+            Container(
+              padding: const EdgeInsets.all(20),
+              alignment: Alignment.center,
+              child: Text(
+                'No top-ups yet',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            )
+          else
+            ..._topups.map((item) {
+              final topup = Map<String, dynamic>.from(item);
+              final topupAmount = topup['amount'];
+              final topupCurrency = topup['currency'];
+              final status = topup['status']?.toString() ?? '';
+              final provider = topup['provider']?.toString() ?? '';
+              final createdAt = _formatServerDate(topup['created_at']);
+
+              return Card(
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: status == 'success'
+                        ? Colors.green[100]
+                        : Colors.orange[100],
+                    child: Icon(
+                      status == 'success' ? Icons.check : Icons.pending,
+                      color: status == 'success' ? Colors.green : Colors.orange,
+                    ),
+                  ),
+                  title: Text(
+                    _moneyText(topupAmount, topupCurrency),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text('$provider • $status • $createdAt'),
+                ),
+              );
+            }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServerHistory() {
+    return RefreshIndicator(
+      onRefresh: _loadServerCdrs,
+      child: _historyLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _historyError != null
+          ? ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red),
+                  ),
+                  child: Text(
+                    _historyError!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _loadServerCdrs,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                ),
+              ],
+            )
+          : _serverCdrs.isEmpty
+          ? ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const SizedBox(height: 120),
+                Icon(Icons.history, size: 64, color: Colors.grey[300]),
+                const SizedBox(height: 16),
+                Center(
+                  child: Text(
+                    'No server call history yet',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: ElevatedButton.icon(
+                    onPressed: _loadServerCdrs,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Refresh'),
+                  ),
+                ),
+              ],
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(8),
+              itemCount: _serverCdrs.length,
+              itemBuilder: (context, index) {
+                final call = Map<String, dynamic>.from(_serverCdrs[index]);
+
+                final number =
+                    call['dialed_number']?.toString().isNotEmpty == true
+                    ? call['dialed_number'].toString()
+                    : call['callee']?.toString() ?? 'Unknown';
+
+                final duration = _formatDurationFromSeconds(
+                  call['connected_seconds'],
+                );
+
+                final answeredTime = _formatServerDate(call['answered_time']);
+
+                final cost =
+                    call['cost'] ?? call['charged_amount'] ?? call['amount'];
+
+                return Card(
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.green[100],
+                      child: const Icon(Icons.call_made, color: Colors.green),
+                    ),
+                    title: Text(
+                      number,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      cost != null
+                          ? '$answeredTime • $duration • Cost: $cost'
+                          : '$answeredTime • $duration',
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.call, color: Colors.green),
+                      onPressed: () {
+                        _dialNumberController.text = number;
+                        setState(() => _selectedIndex = 0);
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
   }
 
   // ---------- UI Components ----------
@@ -1124,21 +1540,47 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         children: [
           _buildDialer(),
           _buildContacts(),
-          _buildCallLog(),
+          _buildWallet(),
+          _buildServerHistory(),
           _buildSettings(),
         ],
       ),
+      // body: IndexedStack(
+      //   index: _selectedIndex,
+      //   children: [
+      //     _buildDialer(),
+      //     _buildContacts(),
+      //     _buildCallLog(),
+      //     _buildSettings(),
+      //   ],
+      // ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
         type: BottomNavigationBarType.fixed,
+        // items: const [
+        //   BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
+        //   BottomNavigationBarItem(
+        //     icon: Icon(Icons.contacts),
+        //     label: 'Contacts',
+        //   ),
+        //   BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Call Log'),
+        //   BottomNavigationBarItem(
+        //     icon: Icon(Icons.settings),
+        //     label: 'Settings',
+        //   ),
+        // ],
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
           BottomNavigationBarItem(
             icon: Icon(Icons.contacts),
             label: 'Contacts',
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Call Log'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.account_balance_wallet),
+            label: 'Wallet',
+          ),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
             label: 'Settings',

@@ -252,6 +252,36 @@ class AuthService {
     }
   }
 
+  static Future<Map<String, dynamic>> createCheckoutSession({
+    required String amount,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/topups/create-checkout-session/'),
+        headers: await _authHeaders(),
+        body: jsonEncode({'amount': amount}),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          data['success'] == true) {
+        return {
+          'success': true,
+          'checkoutUrl': data['checkout_url'],
+          'message': data['message'] ?? 'Checkout session created',
+        };
+      }
+
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Could not start top-up',
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> requestPasswordReset({
     required String email,
   }) async {
