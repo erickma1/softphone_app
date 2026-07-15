@@ -153,10 +153,31 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final TextEditingController _searchController = TextEditingController();
   Future<List<Contact>>? _contactsFuture;
 
+  Future<void> _loadSavedSipDetails() async {
+    final auth = AuthService();
+    final sip = await auth.getSipDetails();
+
+    final username = sip['username'];
+    final password = sip['password'];
+    final domain = sip['domain'];
+
+    if (username != null && password != null && domain != null) {
+      setState(() {
+        _sipUsernameController.text = username;
+        _sipPasswordController.text = password;
+        _sipDomainController.text = domain;
+        _debugMessage = 'SIP details loaded';
+      });
+
+      await _login();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _initAndSetup();
+    _loadSavedSipDetails();
     _dialNumberController.addListener(() {
       if (mounted) setState(() {});
     });
