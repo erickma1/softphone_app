@@ -24,6 +24,14 @@ class LinphoneFlutterPlugin {
     await _channel.invokeMethod('answerCall');
   }
 
+  /// Stream of registration state changes.
+  /// Events are strings like "Login success (2)" or the registration state name.
+  Stream<dynamic> addRegistrationStateListener() {
+    const EventChannel registrationChannel =
+        EventChannel('linphonesdk/login_listener');
+    return registrationChannel.receiveBroadcastStream();
+  }
+
   Future<void> login(
       {required String userName,
       required String domain,

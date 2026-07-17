@@ -51,78 +51,6 @@ public class LinPhoneHelper {
 
 
 
-// public void login(String userName, String domain, String password) {
-//     this.domain = domain;
-//     this.userName = userName;
-//     this.password = password;
-//     Factory factory = Factory.instance();
-//     factory.setDebugMode(true, "LinPhoneSDKTest");
-//     core = factory.createCore(null, null, context);
-
-//     TransportType transportType = TransportType.Udp;
-//     AuthInfo authInfo = Factory.instance().createAuthInfo(userName, null, password, null, null, domain, null);
-//     AccountParams params = core.createAccountParams();
-
-//     String sipAddress = "sip:" + userName + "@" + domain;
-//     Address identity = Factory.instance().createAddress(sipAddress);
-//     params.setIdentityAddress(identity);
-
-//     Address address = Factory.instance().createAddress("sip:" + domain);
-//     address.setTransport(transportType);
-//     params.setServerAddress(address);
-//     params.setRegisterEnabled(true);
-
-//     Account account = core.createAccount(params);
-//     core.addAuthInfo(authInfo);
-//     core.addAccount(account);
-//     core.setDefaultAccount(account);
-
-//     // Set a clean contact address directly on the account (removes duplicate transport and lime spec)
-//     Address contactAddr = Factory.instance().createAddress("sip:" + userName + "@" + domain);
-//     contactAddr.setTransport(transportType);
-//     account.setContactAddress(contactAddr);   // This method exists on Account
-
-//     core.addListener(coreListener);
-//     account.addListener(new AccountListener() {
-//         @Override
-//         public void onRegistrationStateChanged(@NonNull Account account, RegistrationState registrationState, @NonNull String s) {
-//             if (registrationState == RegistrationState.Ok) {
-//                 loginListener.success("Login success (2)");
-//             } else if (registrationState == RegistrationState.Failed) {
-//                 loginListener.error("400", "Login failed", "Failed to login");
-//             }
-//         }
-
-//         @Override
-//         public void onMessageWaitingIndicationChanged(@NonNull Account account, @NonNull MessageWaitingIndication mwi) {
-//             // Not needed
-//         }
-
-//         @Override
-//         public void onConferenceInformationUpdated(@NonNull Account account, @NonNull ConferenceInfo[] conferenceInfos) {
-//             // Not needed
-//         }
-//     });
-//     core.start();
-
-//     // Disable SRTP encryption
-//     core.setMediaEncryption(MediaEncryption.None);
-
-//     // Restrict audio codecs to the ones the server accepts (PCMU, PCMA, telephone-event)
-//     PayloadType[] payloads = core.getAudioPayloadTypes();
-//     for (PayloadType pt : payloads) {
-//         String mime = pt.getMimeType();
-//         pt.enable(false);
-//         if (mime.equals("PCMU") || mime.equals("PCMA") || mime.equals("telephone-event")) {
-//             pt.enable(true);
-//         }
-//     }
-
-//     // Optional: set a custom User-Agent (helps with debugging)
-//     // core.setUserAgent("FlutterSoftphone/1.0", "1.0");
-//     core.setUserAgent("FlutterSoftphone", "2.0");
-// }
-
 public void login(String userName, String domain, String password) {
 
     this.domain = domain;
@@ -135,7 +63,10 @@ public void login(String userName, String domain, String password) {
     core = factory.createCore(null, null, context);
 
     // Better transport for office WiFi
-    TransportType transportType = TransportType.Tcp;
+    // TransportType transportType = TransportType.Tcp;
+    // TransportType transportType = TransportType.Tls;
+    TransportType transportType = TransportType.Udp;
+
 
     // Disable problematic IPv6
     core.setIpv6Enabled(false);
@@ -218,20 +149,44 @@ public void login(String userName, String domain, String password) {
     core.setUserAgent("FlutterSoftphone", "2.0");
 }
 
+    // public void call(String number) {
+    //     if (core == null) return;
+    //     String formattedNumber = String.format("sip:%s@%s", number, domain);
+    //     Address remoteAddress = Factory.instance().createAddress(formattedNumber);
+    //     if (remoteAddress == null) return;
+    //     CallParams params = core.createCallParams(null);
+    //     if (params == null) return;
+
+    //     // Disable encryption for this call
+    //     params.setMediaEncryption(MediaEncryption.None);
+    //     // Enable microphone
+    //     params.setMicEnabled(true);
+
+    //     core.inviteAddressWithParams(remoteAddress, params);
+    // }
     public void call(String number) {
         if (core == null) return;
+
         String formattedNumber = String.format("sip:%s@%s", number, domain);
         Address remoteAddress = Factory.instance().createAddress(formattedNumber);
         if (remoteAddress == null) return;
+
         CallParams params = core.createCallParams(null);
         if (params == null) return;
 
-        // Disable encryption for this call
+        // Normal audio call
         params.setMediaEncryption(MediaEncryption.None);
-        // Enable microphone
         params.setMicEnabled(true);
 
-        core.inviteAddressWithParams(remoteAddress, params);
+        Call call = core.inviteAddressWithParams(remoteAddress, params);
+
+        if (call != null) {
+            try {
+                call.setMicrophoneMuted(false);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to unmute outgoing call: " + e);
+            }
+        }
     }
 
     public boolean callForward(String destination) {
@@ -313,16 +268,34 @@ public void login(String userName, String domain, String password) {
         }
     }
 
+    // public void answerCall() {
+    //     if (core.getCallsNb() == 0) return;
+    //     Call call = core.getCurrentCall();
+    //     if (call == null) call = core.getCalls()[0];
+    //     if (call == null) return;
+    //     CallParams params = core.createCallParams(call);
+    //     if (params == null) return;
+    //     call.acceptWithParams(params);
+    //     callEventListener.success("CallAnswered");
+    // }
+
     public void answerCall() {
-        if (core.getCallsNb() == 0) return;
-        Call call = core.getCurrentCall();
-        if (call == null) call = core.getCalls()[0];
-        if (call == null) return;
-        CallParams params = core.createCallParams(call);
-        if (params == null) return;
-        call.acceptWithParams(params);
-        callEventListener.success("CallAnswered");
-    }
+    if (core == null || core.getCallsNb() == 0) return;
+    Call call = core.getCurrentCall();
+    if (call == null) call = core.getCalls()[0];
+    if (call == null) return;
+
+    CallParams params = core.createCallParams(call);
+    if (params == null) return;
+
+    // Enable microphone and disable encryption for incoming call
+    params.setMicEnabled(true);
+    params.setMediaEncryption(MediaEncryption.None);
+
+    call.acceptWithParams(params);
+    call.setMicrophoneMuted(false);
+    callEventListener.success("CallAnswered");
+}
 
     public void rejectCall() {
         if (core.getCallsNb() == 0) return;
@@ -372,18 +345,54 @@ public void login(String userName, String domain, String password) {
                     Log.e(TAG, "onCallStateChanged: Ringing");
                     callEventListener.success(state.name());
                     break;
+                // case Connected:
+                //     Log.e(TAG, "onCallStateChanged: Connected");
+                //     callEventListener.success(state.name());
+                //     break;
+                // case StreamsRunning:
+                //     Log.e(TAG, "onCallStateChanged: StreamsRunning");
+                //     callEventListener.success(state.name());
+                //     break;
+                // case Paused:
+                //     Log.e(TAG, "onCallStateChanged: Paused");
+                //     callEventListener.success(state.name());
+                //     break;
+                // case PausedByRemote:
+                //     Log.e(TAG, "onCallStateChanged: PausedByRemote");
+                //     callEventListener.success(state.name());
+                //     break;
                 case Connected:
                     Log.e(TAG, "onCallStateChanged: Connected");
+                    try {
+                        call.setMicrophoneMuted(false);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to unmute on Connected: " + e);
+                    }
                     callEventListener.success(state.name());
                     break;
+
                 case StreamsRunning:
                     Log.e(TAG, "onCallStateChanged: StreamsRunning");
+                    try {
+                        call.setMicrophoneMuted(false);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to unmute on StreamsRunning: " + e);
+                    }
                     callEventListener.success(state.name());
                     break;
+
                 case Paused:
-                    Log.e(TAG, "onCallStateChanged: Paused");
-                    callEventListener.success(state.name());
+                    Log.e(TAG, "onCallStateChanged: Paused - unexpected local hold detected, resuming call");
+                    try {
+                        call.resume();
+                        call.setMicrophoneMuted(false);
+                        callEventListener.success("AutoResumedFromPaused");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to auto-resume paused call: " + e);
+                        callEventListener.success(state.name());
+                    }
                     break;
+
                 case PausedByRemote:
                     Log.e(TAG, "onCallStateChanged: PausedByRemote");
                     callEventListener.success(state.name());
