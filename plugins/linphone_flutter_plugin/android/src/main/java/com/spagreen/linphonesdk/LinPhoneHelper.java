@@ -149,20 +149,44 @@ public void login(String userName, String domain, String password) {
     core.setUserAgent("FlutterSoftphone", "2.0");
 }
 
+    // public void call(String number) {
+    //     if (core == null) return;
+    //     String formattedNumber = String.format("sip:%s@%s", number, domain);
+    //     Address remoteAddress = Factory.instance().createAddress(formattedNumber);
+    //     if (remoteAddress == null) return;
+    //     CallParams params = core.createCallParams(null);
+    //     if (params == null) return;
+
+    //     // Disable encryption for this call
+    //     params.setMediaEncryption(MediaEncryption.None);
+    //     // Enable microphone
+    //     params.setMicEnabled(true);
+
+    //     core.inviteAddressWithParams(remoteAddress, params);
+    // }
     public void call(String number) {
         if (core == null) return;
+
         String formattedNumber = String.format("sip:%s@%s", number, domain);
         Address remoteAddress = Factory.instance().createAddress(formattedNumber);
         if (remoteAddress == null) return;
+
         CallParams params = core.createCallParams(null);
         if (params == null) return;
 
-        // Disable encryption for this call
+        // Normal audio call
         params.setMediaEncryption(MediaEncryption.None);
-        // Enable microphone
         params.setMicEnabled(true);
 
-        core.inviteAddressWithParams(remoteAddress, params);
+        Call call = core.inviteAddressWithParams(remoteAddress, params);
+
+        if (call != null) {
+            try {
+                call.setMicrophoneMuted(false);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to unmute outgoing call: " + e);
+            }
+        }
     }
 
     public boolean callForward(String destination) {
@@ -321,18 +345,54 @@ public void login(String userName, String domain, String password) {
                     Log.e(TAG, "onCallStateChanged: Ringing");
                     callEventListener.success(state.name());
                     break;
+                // case Connected:
+                //     Log.e(TAG, "onCallStateChanged: Connected");
+                //     callEventListener.success(state.name());
+                //     break;
+                // case StreamsRunning:
+                //     Log.e(TAG, "onCallStateChanged: StreamsRunning");
+                //     callEventListener.success(state.name());
+                //     break;
+                // case Paused:
+                //     Log.e(TAG, "onCallStateChanged: Paused");
+                //     callEventListener.success(state.name());
+                //     break;
+                // case PausedByRemote:
+                //     Log.e(TAG, "onCallStateChanged: PausedByRemote");
+                //     callEventListener.success(state.name());
+                //     break;
                 case Connected:
                     Log.e(TAG, "onCallStateChanged: Connected");
+                    try {
+                        call.setMicrophoneMuted(false);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to unmute on Connected: " + e);
+                    }
                     callEventListener.success(state.name());
                     break;
+
                 case StreamsRunning:
                     Log.e(TAG, "onCallStateChanged: StreamsRunning");
+                    try {
+                        call.setMicrophoneMuted(false);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to unmute on StreamsRunning: " + e);
+                    }
                     callEventListener.success(state.name());
                     break;
+
                 case Paused:
-                    Log.e(TAG, "onCallStateChanged: Paused");
-                    callEventListener.success(state.name());
+                    Log.e(TAG, "onCallStateChanged: Paused - unexpected local hold detected, resuming call");
+                    try {
+                        call.resume();
+                        call.setMicrophoneMuted(false);
+                        callEventListener.success("AutoResumedFromPaused");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to auto-resume paused call: " + e);
+                        callEventListener.success(state.name());
+                    }
                     break;
+
                 case PausedByRemote:
                     Log.e(TAG, "onCallStateChanged: PausedByRemote");
                     callEventListener.success(state.name());

@@ -7,6 +7,7 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'services/auth_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -459,6 +460,8 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
   CallState _convertCallState(dynamic state) {
     final s = state.toString().toLowerCase();
+    if (s.contains('autoresumed')) return CallState.StreamsRunning;
+    if (s.contains('paused')) return CallState.StreamsRunning;
     if (s.contains('incoming')) return CallState.IncomingReceived;
     if (s.contains('dialing') || s.contains('outgoinginit'))
       return CallState.Dialing;
@@ -644,6 +647,15 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   amount: amount,
                 );
 
+                if (result['success'] == true &&
+                    result['checkoutUrl'] != null) {
+                  final url = Uri.parse(result['checkoutUrl']);
+
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                  }
+                }
+
                 if (!mounted) return;
 
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -771,6 +783,24 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
               final provider = topup['provider']?.toString() ?? '';
               final createdAt = _formatServerDate(topup['created_at']);
 
+              // return Card(
+              //   child: ListTile(
+              //     leading: CircleAvatar(
+              //       backgroundColor: status == 'success'
+              //           ? Colors.green[100]
+              //           : Colors.orange[100],
+              //       child: Icon(
+              //         status == 'success' ? Icons.check : Icons.pending,
+              //         color: status == 'success' ? Colors.green : Colors.orange,
+              //       ),
+              //     ),
+              //     title: Text(
+              //       _moneyText(topupAmount, topupCurrency),
+              //       style: const TextStyle(fontWeight: FontWeight.bold),
+              //     ),
+              //     subtitle: Text('$provider • $status • $createdAt'),
+              //   ),
+              // );
               return Card(
                 child: ListTile(
                   leading: CircleAvatar(
@@ -787,6 +817,45 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: Text('$provider • $status • $createdAt'),
+                  trailing: status == 'pending'
+                      ? TextButton(
+                          onPressed: () async {
+                            final reference =
+                                topup['reference']?.toString() ?? '';
+
+                            if (reference.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Missing payment reference'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
+                            }
+
+                            final result =
+                                await AuthService.verifyPaystackTopup(
+                                  reference: reference,
+                                );
+
+                            if (!mounted) return;
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  result['message'] ?? 'Verification checked',
+                                ),
+                                backgroundColor: result['success'] == true
+                                    ? Colors.green
+                                    : Colors.orange,
+                              ),
+                            );
+
+                            await _loadWalletData();
+                          },
+                          child: const Text('Verify'),
+                        )
+                      : null,
                 ),
               );
             }).toList(),

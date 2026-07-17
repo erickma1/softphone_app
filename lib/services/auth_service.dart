@@ -6,7 +6,8 @@ import '../models/user_model.dart';
 class AuthService {
   // Android emulator uses 10.0.2.2 to reach your computer localhost.
   // static const String baseUrl = 'http://10.0.2.2:8000/api/v1';
-  static const String baseUrl = 'http://192.168.110.22:8000/api/v1';
+  // static const String baseUrl = 'http://192.168.110.22:8000/api/v1';
+  static const String baseUrl = 'https://api.numbersixlimited.com/api/v1';
 
   static const String _tokenKey = 'user_token';
   static const String _refreshTokenKey = 'refresh_token';
@@ -321,6 +322,35 @@ class AuthService {
       }
 
       return {'success': false, 'message': data['message'] ?? 'Invalid token'};
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> verifyPaystackTopup({
+    required String reference,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/topups/verify-paystack/'),
+        headers: await _authHeaders(),
+        body: jsonEncode({'reference': reference}),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {
+          'success': true,
+          'message': data['message'] ?? 'Payment verified',
+          'balance': data['balance'],
+        };
+      }
+
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Payment not verified yet',
+      };
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
     }
