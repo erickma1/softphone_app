@@ -1,7 +1,7 @@
 // lib/screens/register_screen.dart
 import 'package:flutter/material.dart';
+
 import '../services/auth_service.dart';
-import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({Key? key}) : super(key: key);
@@ -13,14 +13,35 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+
   final _formKey = GlobalKey<FormState>();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+
   String? _errorMessage;
+
+  String _formatPhone(String phone) {
+    String value = phone.trim().replaceAll(' ', '').replaceAll('-', '');
+
+    if (value.startsWith('0') && value.length == 10) {
+      return '+233${value.substring(1)}';
+    }
+
+    if (value.startsWith('233')) {
+      return '+$value';
+    }
+
+    if (value.startsWith('+')) {
+      return value;
+    }
+
+    return value;
+  }
 
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
@@ -33,25 +54,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final result = await AuthService.register(
       username: _usernameController.text.trim(),
       email: _emailController.text.trim(),
+      phoneNumber: _formatPhone(_phoneController.text.trim()),
+
+      // Temporary: no Firebase OTP for now
+      firebaseIdToken: '',
+
       password: _passwordController.text,
       confirmPassword: _confirmPasswordController.text,
     );
 
+    if (!mounted) return;
+
     setState(() => _isLoading = false);
 
-    if (result['success']) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Account created successfully! Please login.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pushReplacementNamed(context, '/login');
-      }
+    if (result['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Account created successfully! Please login.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      Navigator.pushReplacementNamed(context, '/login');
     } else {
       setState(() => _errorMessage = result['message']);
-      _showErrorSnackbar(result['message']);
+      _showErrorSnackbar(result['message'] ?? 'Registration failed');
     }
   }
 
@@ -84,7 +111,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 32),
 
-                // Username field
                 TextFormField(
                   controller: _usernameController,
                   decoration: InputDecoration(
@@ -107,7 +133,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // Email field
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -130,7 +155,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // Password field
+                TextFormField(
+                  controller: _phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: InputDecoration(
+                    labelText: 'Phone Number',
+                    prefixIcon: const Icon(Icons.phone),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    helperText: 'Example: 0244581191 or +233244581191',
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Phone number is required';
+                    }
+                    if (value.length < 10) {
+                      return 'Enter a valid phone number';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
                 TextFormField(
                   controller: _passwordController,
                   obscureText: _obscurePassword,
@@ -164,7 +211,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // Confirm password field
                 TextFormField(
                   controller: _confirmPasswordController,
                   obscureText: _obscureConfirmPassword,
@@ -198,9 +244,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     return null;
                   },
                 ),
+
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                ],
+
                 const SizedBox(height: 32),
 
-                // Register button
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -231,9 +285,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                   ),
                 ),
+
                 const SizedBox(height: 16),
 
-                // Login link
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -268,6 +322,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _usernameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
