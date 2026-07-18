@@ -75,9 +75,19 @@ class AuthService {
   }
 
   // ---------- API Methods ----------
+  // static Future<Map<String, dynamic>> register({
+  //   required String username,
+  //   required String email,
+  //   required String password,
+  //   required String confirmPassword,
+  //   required String phoneNumber,
+  //   required String firebaseIdToken,
+  // }) async {
   static Future<Map<String, dynamic>> register({
     required String username,
     required String email,
+    required String phoneNumber,
+    required String firebaseIdToken,
     required String password,
     required String confirmPassword,
   }) async {
@@ -88,6 +98,8 @@ class AuthService {
         body: jsonEncode({
           'username': username,
           'email': email,
+          'phoneNumber': phoneNumber,
+          'firebaseIdToken': firebaseIdToken,
           'password': password,
           'confirmPassword': confirmPassword,
         }),

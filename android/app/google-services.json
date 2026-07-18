@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "734611718185",
+    "project_id": "softphone-ff414",
+    "storage_bucket": "softphone-ff414.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:734611718185:android:94cb66cd6d1bda0887dc38",
+        "android_client_info": {
+          "package_name": "com.example.softphone_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBqOa1GhKfoNLwjJbg9NelSFJQmGWeGQow"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

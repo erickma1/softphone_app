@@ -8,7 +8,14 @@ import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'services/auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+// import 'package:firebase_core/firebase_core.dart';
+// import 'firebase_options.dart';
 
+// void main() async {
+//   WidgetsFlutterBinding.ensureInitialized();
+//   await Firebase.initializeApp();
+//   runApp(const MySoftphoneApp());
+// }
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MySoftphoneApp());
