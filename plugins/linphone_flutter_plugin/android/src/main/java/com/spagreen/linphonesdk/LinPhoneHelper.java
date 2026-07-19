@@ -381,16 +381,20 @@ public void login(String userName, String domain, String password) {
                     callEventListener.success(state.name());
                     break;
 
+                // case Paused:
+                //     Log.e(TAG, "onCallStateChanged: Paused - unexpected local hold detected, resuming call");
+                //     try {
+                //         call.resume();
+                //         call.setMicrophoneMuted(false);
+                //         callEventListener.success("AutoResumedFromPaused");
+                //     } catch (Exception e) {
+                //         Log.e(TAG, "Failed to auto-resume paused call: " + e);
+                //         callEventListener.success(state.name());
+                //     }
+                //     break;
                 case Paused:
-                    Log.e(TAG, "onCallStateChanged: Paused - unexpected local hold detected, resuming call");
-                    try {
-                        call.resume();
-                        call.setMicrophoneMuted(false);
-                        callEventListener.success("AutoResumedFromPaused");
-                    } catch (Exception e) {
-                        Log.e(TAG, "Failed to auto-resume paused call: " + e);
-                        callEventListener.success(state.name());
-                    }
+                    Log.e(TAG, "onCallStateChanged: Paused - call is on hold, not auto-resuming immediately");
+                    callEventListener.success(state.name());
                     break;
 
                 case PausedByRemote:
