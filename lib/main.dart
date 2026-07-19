@@ -27,6 +27,7 @@ class MySoftphoneApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Number 6 Softphone',
       theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
       home: const SplashScreen(),
@@ -150,11 +151,21 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   String _debugMessage = '';
 
   // Call tracking
+  // DateTime? _callStartTime;
+  // int _callDuration = 0;
+  // String? _currentCallNumber;
+  // List<CallLogEntry> _callLogs = [];
+  // bool _isOutgoingCall = false;
+  // Call tracking
   DateTime? _callStartTime;
   int _callDuration = 0;
   String? _currentCallNumber;
   List<CallLogEntry> _callLogs = [];
   bool _isOutgoingCall = false;
+
+  // This allows us to show the red end-call button immediately
+  // after dialing, even before the called party answers.
+  bool _callInProgress = false;
 
   // Contacts
   List<Contact> _contacts = [];
@@ -173,6 +184,25 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   String? _walletError;
   String? _historyError;
 
+  // Future<void> _loadSavedSipDetails() async {
+  //   final auth = AuthService();
+  //   final sip = await auth.getSipDetails();
+
+  //   final username = sip['username'];
+  //   final password = sip['password'];
+  //   final domain = sip['domain'];
+
+  //   if (username != null && password != null && domain != null) {
+  //     setState(() {
+  //       _sipUsernameController.text = username;
+  //       _sipPasswordController.text = password;
+  //       _sipDomainController.text = domain;
+  //       _debugMessage = 'SIP details loaded';
+  //     });
+
+  //     await _login();
+  //   }
+  // }
   Future<void> _loadSavedSipDetails() async {
     final auth = AuthService();
     final sip = await auth.getSipDetails();
@@ -183,13 +213,20 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
     if (username != null && password != null && domain != null) {
       setState(() {
-        _sipUsernameController.text = username;
-        _sipPasswordController.text = password;
-        _sipDomainController.text = domain;
-        _debugMessage = 'SIP details loaded';
+        _sipUsernameController.text = username.toString();
+        _sipPasswordController.text = password.toString();
+        _sipDomainController.text = domain.toString();
+        _debugMessage = 'SIP account loaded. Registering automatically...';
       });
 
+      // Register SIP automatically after app login.
       await _login();
+    } else {
+      setState(() {
+        _debugMessage = 'No SIP account found for this user';
+        _registrationState = RegistrationState.Failed;
+        _isRegistered = false;
+      });
     }
   }
 
@@ -210,12 +247,48 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   Future<void> _initAndSetup() async {
     await _requestPermissions();
 
+    // _linphonePlugin.addCallStateListener().listen((dynamic state) {
+    //   final callState = _convertCallState(state);
+    //   setState(() => _currentCallState = callState);
+    //   _log('Call state changed: $callState');
+
+    //   if (callState == CallState.Connected && _callStartTime == null) {
+    //     _callStartTime = DateTime.now();
+    //     _log('Call connected');
+    //   }
+
+    //   if (callState == CallState.IncomingReceived) {
+    //     _isOutgoingCall = false;
+    //     _currentCallNumber = 'Incoming call';
+    //     _showIncomingCallDialog();
+    //   }
+
+    //   if (callState == CallState.End || callState == CallState.Error) {
+    //     _handleCallEnd();
+    //   }
+    // });
     _linphonePlugin.addCallStateListener().listen((dynamic state) {
       final callState = _convertCallState(state);
-      setState(() => _currentCallState = callState);
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentCallState = callState;
+
+        if (callState == CallState.Dialing ||
+            callState == CallState.Ringing ||
+            callState == CallState.Connected ||
+            callState == CallState.StreamsRunning ||
+            callState == CallState.IncomingReceived) {
+          _callInProgress = true;
+        }
+      });
+
       _log('Call state changed: $callState');
 
-      if (callState == CallState.Connected && _callStartTime == null) {
+      if ((callState == CallState.Connected ||
+              callState == CallState.StreamsRunning) &&
+          _callStartTime == null) {
         _callStartTime = DateTime.now();
         _log('Call connected');
       }
@@ -285,9 +358,16 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
       );
     }
 
-    _callStartTime = null;
-    _callDuration = 0;
-    _currentCallNumber = null;
+    // _callStartTime = null;
+    // _callDuration = 0;
+    // _currentCallNumber = null;
+    setState(() {
+      _callStartTime = null;
+      _callDuration = 0;
+      _currentCallNumber = null;
+      _callInProgress = false;
+      _currentCallState = CallState.End;
+    });
 
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
@@ -431,32 +511,88 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     }
   }
 
+  // Future<void> _makeCall() async {
+  //   final number = _dialNumberController.text.trim();
+  //   if (number.isEmpty) {
+  //     _log('Please enter a number');
+  //     return;
+  //   }
+  //   if (!_isRegistered) {
+  //     _log('Not registered');
+  //     return;
+  //   }
+  //   try {
+  //     _isOutgoingCall = true;
+  //     _currentCallNumber = number;
+  //     await _linphonePlugin.call(number: number);
+  //     _log('Calling $number...');
+  //   } catch (e) {
+  //     _log('Failed to call: $e');
+  //   }
+  // }
   Future<void> _makeCall() async {
     final number = _dialNumberController.text.trim();
+
     if (number.isEmpty) {
       _log('Please enter a number');
       return;
     }
+
     if (!_isRegistered) {
-      _log('Not registered');
+      _log('SIP is not registered yet. Please wait...');
       return;
     }
+
     try {
-      _isOutgoingCall = true;
-      _currentCallNumber = number;
+      setState(() {
+        _isOutgoingCall = true;
+        _currentCallNumber = number;
+        _currentCallState = CallState.Dialing;
+        _callInProgress = true;
+        _debugMessage = 'Calling $number...';
+      });
+
       await _linphonePlugin.call(number: number);
+
       _log('Calling $number...');
     } catch (e) {
+      setState(() {
+        _callInProgress = false;
+        _currentCallState = CallState.Error;
+        _currentCallNumber = null;
+      });
+
       _log('Failed to call: $e');
     }
   }
 
+  // Future<void> _hangUp() async {
+  //   try {
+  //     await _linphonePlugin.hangUp();
+  //     _log('Call ended');
+  //   } catch (e) {
+  //     _log('Hang up error: $e');
+  //   }
+  // }
+
   Future<void> _hangUp() async {
     try {
       await _linphonePlugin.hangUp();
+
+      setState(() {
+        _callInProgress = false;
+        _currentCallState = CallState.End;
+      });
+
       _log('Call ended');
     } catch (e) {
       _log('Hang up error: $e');
+
+      // Even if the plugin throws an error, reset the UI so user is not stuck.
+      setState(() {
+        _callInProgress = false;
+        _currentCallState = CallState.End;
+      });
     }
   }
 
@@ -974,150 +1110,331 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
   // ---------- UI Components ----------
   Widget _buildDialer() {
+    // bool isCallActive =
+    //     _currentCallState != null &&
+    //     _currentCallState != CallState.Idle &&
+    //     _currentCallState != CallState.End &&
+    //     _currentCallState != CallState.Error;
     bool isCallActive =
-        _currentCallState != null &&
-        _currentCallState != CallState.Idle &&
-        _currentCallState != CallState.End &&
-        _currentCallState != CallState.Error;
+        _callInProgress ||
+        (_currentCallState != null &&
+            _currentCallState != CallState.Idle &&
+            _currentCallState != CallState.End &&
+            _currentCallState != CallState.Error);
     bool hasText = _dialNumberController.text.isNotEmpty;
 
+    // return SafeArea(
+    //   child: Column(
+    //     children: [
+    //       Expanded(
+    //         child: Column(
+    //           mainAxisAlignment: MainAxisAlignment.center,
+    //           children: [
+    //             Container(
+    //               margin: const EdgeInsets.symmetric(horizontal: 16),
+    //               padding: const EdgeInsets.symmetric(
+    //                 horizontal: 20,
+    //                 vertical: 20,
+    //               ),
+    //               decoration: BoxDecoration(
+    //                 color: Colors.grey[100],
+    //                 borderRadius: BorderRadius.circular(16),
+    //                 border: Border.all(color: Colors.grey[300]!),
+    //               ),
+    //               child: Column(
+    //                 children: [
+    //                   TextField(
+    //                     controller: _dialNumberController,
+    //                     style: const TextStyle(
+    //                       fontSize: 36,
+    //                       fontWeight: FontWeight.bold,
+    //                     ),
+    //                     textAlign: TextAlign.center,
+    //                     keyboardType: TextInputType.phone,
+    //                     decoration: const InputDecoration(
+    //                       hintText: '',
+    //                       border: InputBorder.none,
+    //                       contentPadding: EdgeInsets.zero,
+    //                     ),
+    //                   ),
+    //                   if (_currentCallState != null &&
+    //                       _currentCallState != CallState.Idle)
+    //                     Padding(
+    //                       padding: const EdgeInsets.only(top: 12),
+    //                       child: Chip(
+    //                         label: Text(
+    //                           _currentCallState.toString().split('.').last,
+    //                         ),
+    //                         backgroundColor: _getCallStateColor(),
+    //                         labelStyle: const TextStyle(color: Colors.white),
+    //                       ),
+    //                     ),
+    //                 ],
+    //               ),
+    //             ),
+    //             const SizedBox(height: 24),
+    //             Padding(
+    //               padding: const EdgeInsets.symmetric(horizontal: 16),
+    //               child: Column(
+    //                 children: [
+    //                   Row(
+    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    //                     children: [
+    //                       _circularDialButton('1', ''),
+    //                       _circularDialButton('2', 'ABC'),
+    //                       _circularDialButton('3', 'DEF'),
+    //                     ],
+    //                   ),
+    //                   const SizedBox(height: 16),
+    //                   Row(
+    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    //                     children: [
+    //                       _circularDialButton('4', 'GHI'),
+    //                       _circularDialButton('5', 'JKL'),
+    //                       _circularDialButton('6', 'MNO'),
+    //                     ],
+    //                   ),
+    //                   const SizedBox(height: 16),
+    //                   Row(
+    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    //                     children: [
+    //                       _circularDialButton('7', 'PQRS'),
+    //                       _circularDialButton('8', 'TUV'),
+    //                       _circularDialButton('9', 'WXYZ'),
+    //                     ],
+    //                   ),
+    //                   const SizedBox(height: 16),
+    //                   Row(
+    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    //                     children: [
+    //                       _circularDialButton('*', ''),
+    //                       _circularDialButton('0', '+'),
+    //                       _circularDialButton('#', ''),
+    //                     ],
+    //                   ),
+    //                 ],
+    //               ),
+    //             ),
+    //             const SizedBox(height: 30),
+    //             Row(
+    //               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    //               children: [
+    //                 FloatingActionButton.extended(
+    //                   onPressed: () {
+    //                     _linphonePlugin.toggleSpeaker();
+    //                     _log('Speaker toggled');
+    //                   },
+    //                   icon: const Icon(Icons.volume_up),
+    //                   backgroundColor: Colors.blue[400],
+    //                   label: const SizedBox.shrink(),
+    //                 ),
+    //                 FloatingActionButton(
+    //                   onPressed: isCallActive ? _hangUp : _makeCall,
+    //                   backgroundColor: isCallActive ? Colors.red : Colors.green,
+    //                   child: Icon(
+    //                     isCallActive ? Icons.call_end : Icons.call,
+    //                     size: 32,
+    //                   ),
+    //                 ),
+    //                 if (hasText)
+    //                   FloatingActionButton.extended(
+    //                     onPressed: () {
+    //                       final text = _dialNumberController.text;
+    //                       if (text.isNotEmpty) {
+    //                         _dialNumberController.text = text.substring(
+    //                           0,
+    //                           text.length - 1,
+    //                         );
+    //                       }
+    //                     },
+    //                     icon: const Icon(Icons.backspace),
+    //                     backgroundColor: Colors.grey[400],
+    //                     label: const SizedBox.shrink(),
+    //                   )
+    //                 else
+    //                   const SizedBox(width: 56),
+    //               ],
+    //             ),
+    //             const SizedBox(height: 20),
+    //           ],
+    //         ),
+    //       ),
+    //     ],
+    //   ),
+    // );
+
     return SafeArea(
-      child: Column(
-        children: [
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 20,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.grey[300]!),
-                  ),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _dialNumberController,
-                        style: const TextStyle(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                        keyboardType: TextInputType.phone,
-                        decoration: const InputDecoration(
-                          hintText: '',
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                      if (_currentCallState != null &&
-                          _currentCallState != CallState.Idle)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Chip(
-                            label: Text(
-                              _currentCallState.toString().split('.').last,
-                            ),
-                            backgroundColor: _getCallStateColor(),
-                            labelStyle: const TextStyle(color: Colors.white),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final bool smallScreen = constraints.maxHeight < 620;
+
+          final double keypadButtonSize = smallScreen ? 72 : 88;
+          final double keypadSpacing = smallScreen ? 10 : 18;
+          final double displayFontSize = smallScreen ? 36 : 44;
+          final double cardPadding = smallScreen ? 12 : 20;
+
+          return SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.all(smallScreen ? 10 : 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(cardPadding),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          _dialNumberController.text.isEmpty
+                              ? 'Enter number'
+                              : _dialNumberController.text,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: displayFontSize,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('1', ''),
-                          _circularDialButton('2', 'ABC'),
-                          _circularDialButton('3', 'DEF'),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('4', 'GHI'),
-                          _circularDialButton('5', 'JKL'),
-                          _circularDialButton('6', 'MNO'),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('7', 'PQRS'),
-                          _circularDialButton('8', 'TUV'),
-                          _circularDialButton('9', 'WXYZ'),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _circularDialButton('*', ''),
-                          _circularDialButton('0', '+'),
-                          _circularDialButton('#', ''),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 30),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    FloatingActionButton.extended(
-                      onPressed: () {
-                        _linphonePlugin.toggleSpeaker();
-                        _log('Speaker toggled');
-                      },
-                      icon: const Icon(Icons.volume_up),
-                      backgroundColor: Colors.blue[400],
-                      label: const SizedBox.shrink(),
+
+                        const SizedBox(height: 12),
+
+                        if (_callInProgress ||
+                            (_currentCallState != null &&
+                                _currentCallState != CallState.Idle &&
+                                _currentCallState != CallState.End &&
+                                _currentCallState != CallState.Error))
+                          ElevatedButton(
+                            onPressed: _hangUp,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
+                            ),
+                            child: const Text('End'),
+                          ),
+                      ],
                     ),
-                    FloatingActionButton(
-                      onPressed: isCallActive ? _hangUp : _makeCall,
-                      backgroundColor: isCallActive ? Colors.red : Colors.green,
-                      child: Icon(
-                        isCallActive ? Icons.call_end : Icons.call,
-                        size: 32,
-                      ),
-                    ),
-                    if (hasText)
-                      FloatingActionButton.extended(
-                        onPressed: () {
-                          final text = _dialNumberController.text;
-                          if (text.isNotEmpty) {
-                            _dialNumberController.text = text.substring(
-                              0,
-                              text.length - 1,
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.backspace),
-                        backgroundColor: Colors.grey[400],
-                        label: const SizedBox.shrink(),
-                      )
-                    else
-                      const SizedBox(width: 56),
-                  ],
-                ),
-                const SizedBox(height: 20),
-              ],
+                  ),
+
+                  SizedBox(height: keypadSpacing),
+
+                  _buildKeypadResponsive(
+                    buttonSize: keypadButtonSize,
+                    spacing: keypadSpacing,
+                  ),
+                ],
+              ),
             ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildKeypadResponsive({
+    required double buttonSize,
+    required double spacing,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildDialButtonResponsive('1', '', buttonSize),
+            _buildDialButtonResponsive('2', 'ABC', buttonSize),
+            _buildDialButtonResponsive('3', 'DEF', buttonSize),
+          ],
+        ),
+        SizedBox(height: spacing),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildDialButtonResponsive('4', 'GHI', buttonSize),
+            _buildDialButtonResponsive('5', 'JKL', buttonSize),
+            _buildDialButtonResponsive('6', 'MNO', buttonSize),
+          ],
+        ),
+        SizedBox(height: spacing),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildDialButtonResponsive('7', 'PQRS', buttonSize),
+            _buildDialButtonResponsive('8', 'TUV', buttonSize),
+            _buildDialButtonResponsive('9', 'WXYZ', buttonSize),
+          ],
+        ),
+        SizedBox(height: spacing),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildDialButtonResponsive('*', '', buttonSize),
+            _buildDialButtonResponsive('0', '+', buttonSize),
+            _buildDialButtonResponsive('#', '', buttonSize),
+          ],
+        ),
+        SizedBox(height: spacing),
+      ],
+    );
+  }
+
+  Widget _buildDialButtonResponsive(
+    String number,
+    String letters,
+    double size,
+  ) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(size / 2),
+        onTap: () {
+          setState(() {
+            _dialNumberController.text += number;
+          });
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white,
+            border: Border.all(color: Colors.grey.shade300),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
-        ],
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                number,
+                style: TextStyle(
+                  fontSize: size < 80 ? 32 : 38,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (letters.isNotEmpty)
+                Text(
+                  letters,
+                  style: TextStyle(
+                    fontSize: size < 80 ? 10 : 12,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1393,8 +1710,45 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
-  // ---------- Settings Tab ----------
   Widget _buildSettings() {
+    String registrationText;
+
+    switch (_registrationState) {
+      case RegistrationState.Ok:
+        registrationText = 'Registered';
+        break;
+      case RegistrationState.Progress:
+        registrationText = 'Registering...';
+        break;
+      case RegistrationState.Failed:
+        registrationText = 'Registration Failed';
+        break;
+      case RegistrationState.None:
+        registrationText = 'Not Registered';
+        break;
+    }
+
+    Color statusColor;
+
+    switch (_registrationState) {
+      case RegistrationState.Ok:
+        statusColor = Colors.green;
+        break;
+      case RegistrationState.Progress:
+        statusColor = Colors.orange;
+        break;
+      case RegistrationState.Failed:
+        statusColor = Colors.red;
+        break;
+      case RegistrationState.None:
+        statusColor = Colors.grey;
+        break;
+    }
+
+    final sipUsername = _sipUsernameController.text.trim().isEmpty
+        ? 'Not available'
+        : _sipUsernameController.text.trim();
+
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1402,167 +1756,154 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'SIP Configuration',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              'Account Settings',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _sipUsernameController,
-              decoration: InputDecoration(
-                labelText: 'SIP Username',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                prefixIcon: const Icon(Icons.person),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _sipPasswordController,
-              decoration: InputDecoration(
-                labelText: 'Password',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                prefixIcon: const Icon(Icons.lock),
-              ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _sipDomainController,
-              decoration: InputDecoration(
-                labelText: 'Domain (e.g., sip.example.com)',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                prefixIcon: const Icon(Icons.domain),
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
+
+            const SizedBox(height: 20),
+
+            Container(
               width: double.infinity,
-              child: _registrationState == RegistrationState.Progress
-                  ? const Center(child: CircularProgressIndicator())
-                  : ElevatedButton(
-                      onPressed: _isRegistered ? _logout : _login,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        backgroundColor: _isRegistered
-                            ? Colors.red
-                            : Colors.green,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: Text(
-                        _isRegistered ? 'Logout SIP' : 'Register SIP',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-            ),
-            if (_registrationState == RegistrationState.Ok)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    border: Border.all(color: Colors.green),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: const [
-                      Icon(Icons.check_circle, color: Colors.green),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Successfully registered',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[300]!),
               ),
-            if (_registrationState == RegistrationState.Failed)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    border: Border.all(color: Colors.red),
-                    borderRadius: BorderRadius.circular(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'SIP Account',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-                  child: Row(
+
+                  const SizedBox(height: 16),
+
+                  Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Colors.red),
-                      const SizedBox(width: 8),
+                      const Icon(Icons.person, color: Colors.blue),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Registration failed: $_registrationError',
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontWeight: FontWeight.w500,
+                          'SIP Username: $sipUsername',
+                          style: const TextStyle(fontSize: 15),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Icon(Icons.circle, color: statusColor, size: 14),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Registration Status: $registrationText',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: statusColor,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                     ],
                   ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Colors.grey),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _debugMessage.isEmpty
+                              ? 'No system message'
+                              : _debugMessage,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            if (_registrationState == RegistrationState.Progress)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(),
                 ),
               ),
-            const SizedBox(height: 32),
+
+            if (_registrationState == RegistrationState.Failed)
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _loadSavedSipDetails,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry SIP Registration'),
+                ),
+              ),
+
+            const SizedBox(height: 24),
             const Divider(),
+            const SizedBox(height: 16),
+
             const Text(
               'App Account',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 8),
+
+            const SizedBox(height: 12),
+
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
+              child: ElevatedButton.icon(
                 onPressed: () async {
-                  final auth = AuthService();
-                  await auth.clearToken();
-                  if (mounted) {
-                    Navigator.pushReplacementNamed(context, '/login');
+                  try {
+                    if (_callInProgress) {
+                      await _hangUp();
+                    }
+
+                    await _logout();
+
+                    final auth = AuthService();
+                    await auth.clearToken();
+
+                    if (mounted) {
+                      Navigator.pushReplacementNamed(context, '/login');
+                    }
+                  } catch (e) {
+                    _log('App logout error: $e');
                   }
                 },
+                icon: const Icon(Icons.logout, color: Colors.white),
+                label: const Text(
+                  'Logout',
+                  style: TextStyle(color: Colors.white),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
-                child: const Text(
-                  'Logout from App',
-                  style: TextStyle(color: Colors.white),
-                ),
               ),
             ),
-            const SizedBox(height: 32),
-            const Divider(),
-            const Text(
-              'Debug Log',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _debugMessage.isEmpty ? 'No messages' : _debugMessage,
-                style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
-              ),
+
+            const SizedBox(height: 24),
+
+            Text(
+              'Your SIP server credentials are managed automatically',
+              style: TextStyle(color: Colors.grey[600], fontSize: 13),
             ),
           ],
         ),
