@@ -150,13 +150,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   CallState? _currentCallState;
   String _debugMessage = '';
 
-  // Call tracking
-  // DateTime? _callStartTime;
-  // int _callDuration = 0;
-  // String? _currentCallNumber;
-  // List<CallLogEntry> _callLogs = [];
-  // bool _isOutgoingCall = false;
-  // Call tracking
   DateTime? _callStartTime;
   int _callDuration = 0;
   String? _currentCallNumber;
@@ -184,25 +177,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   String? _walletError;
   String? _historyError;
 
-  // Future<void> _loadSavedSipDetails() async {
-  //   final auth = AuthService();
-  //   final sip = await auth.getSipDetails();
-
-  //   final username = sip['username'];
-  //   final password = sip['password'];
-  //   final domain = sip['domain'];
-
-  //   if (username != null && password != null && domain != null) {
-  //     setState(() {
-  //       _sipUsernameController.text = username;
-  //       _sipPasswordController.text = password;
-  //       _sipDomainController.text = domain;
-  //       _debugMessage = 'SIP details loaded';
-  //     });
-
-  //     await _login();
-  //   }
-  // }
   Future<void> _loadSavedSipDetails() async {
     final auth = AuthService();
     final sip = await auth.getSipDetails();
@@ -247,26 +221,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   Future<void> _initAndSetup() async {
     await _requestPermissions();
 
-    // _linphonePlugin.addCallStateListener().listen((dynamic state) {
-    //   final callState = _convertCallState(state);
-    //   setState(() => _currentCallState = callState);
-    //   _log('Call state changed: $callState');
-
-    //   if (callState == CallState.Connected && _callStartTime == null) {
-    //     _callStartTime = DateTime.now();
-    //     _log('Call connected');
-    //   }
-
-    //   if (callState == CallState.IncomingReceived) {
-    //     _isOutgoingCall = false;
-    //     _currentCallNumber = 'Incoming call';
-    //     _showIncomingCallDialog();
-    //   }
-
-    //   if (callState == CallState.End || callState == CallState.Error) {
-    //     _handleCallEnd();
-    //   }
-    // });
     _linphonePlugin.addCallStateListener().listen((dynamic state) {
       final callState = _convertCallState(state);
 
@@ -488,7 +442,10 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
       setState(() {
         _registrationState = RegistrationState.Failed;
         _isRegistered = false;
-        _debugMessage = 'Registration error: ${e.toString()}';
+        // _debugMessage = 'Registration error: ${e.toString()}';
+        debugPrint('[SIP Registration Error] $e');
+        _debugMessage =
+            'SIP registration failed. Please check your connection and try again.';
       });
     }
   }
@@ -647,6 +604,127 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     return contacts;
   }
 
+  //ERROR HANDLING FOR NETWORK ISSUES
+
+  String _friendlyErrorMessage(
+    dynamic error, {
+    String fallback = 'Something went wrong. Please try again.',
+  }) {
+    final raw = error?.toString() ?? '';
+    final lower = raw.toLowerCase();
+
+    // No internet / DNS / phone offline
+    if (lower.contains('socketexception') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('no address associated with hostname') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('clientexception') ||
+        lower.contains('connection failed')) {
+      return 'No internet connection. Please connect to mobile data or WiFi and try again.';
+    }
+
+    // Slow or unstable internet
+    if (lower.contains('timed out') || lower.contains('timeout')) {
+      return 'The request took too long. Please check your connection and try again.';
+    }
+
+    // Server unreachable
+    if (lower.contains('connection refused') ||
+        lower.contains('connection reset')) {
+      return 'Unable to reach Number 6 service right now. Please try again shortly.';
+    }
+
+    // Auth/session issue
+    if (lower.contains('401') || lower.contains('unauthorized')) {
+      return 'Your session has expired. Please log in again.';
+    }
+
+    if (lower.contains('403') || lower.contains('forbidden')) {
+      return 'You are not allowed to perform this action.';
+    }
+
+    // Server error
+    if (lower.contains('500') ||
+        lower.contains('502') ||
+        lower.contains('503') ||
+        lower.contains('504')) {
+      return 'Number 6 service is temporarily unavailable. Please try again shortly.';
+    }
+
+    // Hide anything technical
+    if (lower.contains('http://') ||
+        lower.contains('https://') ||
+        lower.contains('/api/') ||
+        lower.contains('exception') ||
+        lower.contains('traceback') ||
+        lower.contains('errno')) {
+      return fallback;
+    }
+
+    return fallback;
+  }
+
+  String _safeApiMessage(dynamic message, {required String fallback}) {
+    if (message == null) return fallback;
+
+    final text = message.toString().trim();
+    if (text.isEmpty) return fallback;
+
+    final lower = text.toLowerCase();
+
+    // Never show API URLs, endpoints, exceptions, or system errors to users.
+    if (lower.contains('http://') ||
+        lower.contains('https://') ||
+        lower.contains('/api/') ||
+        lower.contains('socketexception') ||
+        lower.contains('clientexception') ||
+        lower.contains('exception') ||
+        lower.contains('traceback') ||
+        lower.contains('errno') ||
+        lower.contains('failed host lookup')) {
+      return _friendlyErrorMessage(text, fallback: fallback);
+    }
+
+    return text;
+  }
+
+  // Future<void> _loadWalletData() async {
+  //   if (!mounted) return;
+
+  //   setState(() {
+  //     _walletLoading = true;
+  //     _walletError = null;
+  //   });
+
+  //   try {
+  //     final balanceResult = await AuthService.getBalance();
+  //     final topupsResult = await AuthService.getTopups();
+
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       if (balanceResult['success'] == true) {
+  //         _walletBalance = Map<String, dynamic>.from(balanceResult['balance']);
+  //       } else {
+  //         _walletError = balanceResult['message'] ?? 'Could not load balance';
+  //       }
+
+  //       if (topupsResult['success'] == true) {
+  //         _topups = List<dynamic>.from(topupsResult['topups']);
+  //       }
+
+  //       _walletLoading = false;
+  //     });
+  //   } catch (e) {
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       _walletLoading = false;
+  //       _walletError = e.toString();
+  //     });
+  //   }
+  // }
+
   Future<void> _loadWalletData() async {
     if (!mounted) return;
 
@@ -665,7 +743,10 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         if (balanceResult['success'] == true) {
           _walletBalance = Map<String, dynamic>.from(balanceResult['balance']);
         } else {
-          _walletError = balanceResult['message'] ?? 'Could not load balance';
+          _walletError = _safeApiMessage(
+            balanceResult['message'],
+            fallback: 'Could not load wallet balance. Please try again.',
+          );
         }
 
         if (topupsResult['success'] == true) {
@@ -675,14 +756,52 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         _walletLoading = false;
       });
     } catch (e) {
+      // Keep technical error in console only, not on screen.
+      debugPrint('[Wallet Error] $e');
+
       if (!mounted) return;
 
       setState(() {
         _walletLoading = false;
-        _walletError = e.toString();
+        _walletError = _friendlyErrorMessage(
+          e,
+          fallback: 'Could not load wallet balance. Please try again.',
+        );
       });
     }
   }
+
+  // Future<void> _loadServerCdrs() async {
+  //   if (!mounted) return;
+
+  //   setState(() {
+  //     _historyLoading = true;
+  //     _historyError = null;
+  //   });
+
+  //   try {
+  //     final result = await AuthService.getCdrs();
+
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       if (result['success'] == true) {
+  //         _serverCdrs = List<dynamic>.from(result['cdrs']);
+  //       } else {
+  //         _historyError = result['message'] ?? 'Could not load call history';
+  //       }
+
+  //       _historyLoading = false;
+  //     });
+  //   } catch (e) {
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       _historyLoading = false;
+  //       _historyError = e.toString();
+  //     });
+  //   }
+  // }
 
   Future<void> _loadServerCdrs() async {
     if (!mounted) return;
@@ -701,17 +820,26 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         if (result['success'] == true) {
           _serverCdrs = List<dynamic>.from(result['cdrs']);
         } else {
-          _historyError = result['message'] ?? 'Could not load call history';
+          _historyError = _safeApiMessage(
+            result['message'],
+            fallback: 'Could not load call history. Please try again.',
+          );
         }
 
         _historyLoading = false;
       });
     } catch (e) {
+      // Keep technical error in console only, not on screen.
+      debugPrint('[CDR Error] $e');
+
       if (!mounted) return;
 
       setState(() {
         _historyLoading = false;
-        _historyError = e.toString();
+        _historyError = _friendlyErrorMessage(
+          e,
+          fallback: 'Could not load call history. Please try again.',
+        );
       });
     }
   }
@@ -803,7 +931,14 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(result['message'] ?? 'Top-up request sent'),
+                    // content: Text(result['message'] ?? 'Top-up request sent'),
+                    content: Text(
+                      _safeApiMessage(
+                        result['message'],
+                        fallback:
+                            'Top-up request could not be completed. Please try again.',
+                      ),
+                    ),
                     backgroundColor: result['success'] == true
                         ? Colors.green
                         : Colors.orange,
@@ -985,8 +1120,15 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
+                                // content: Text(
+                                //   result['message'] ?? 'Verification checked',
+                                // ),
                                 content: Text(
-                                  result['message'] ?? 'Verification checked',
+                                  _safeApiMessage(
+                                    result['message'],
+                                    fallback:
+                                        'Payment verification could not be completed. Please try again.',
+                                  ),
                                 ),
                                 backgroundColor: result['success'] == true
                                     ? Colors.green
@@ -1110,230 +1252,161 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
   // ---------- UI Components ----------
   Widget _buildDialer() {
-    // bool isCallActive =
-    //     _currentCallState != null &&
-    //     _currentCallState != CallState.Idle &&
-    //     _currentCallState != CallState.End &&
-    //     _currentCallState != CallState.Error;
-    bool isCallActive =
+    final bool isCallActive =
         _callInProgress ||
         (_currentCallState != null &&
             _currentCallState != CallState.Idle &&
             _currentCallState != CallState.End &&
             _currentCallState != CallState.Error);
-    bool hasText = _dialNumberController.text.isNotEmpty;
 
-    // return SafeArea(
-    //   child: Column(
-    //     children: [
-    //       Expanded(
-    //         child: Column(
-    //           mainAxisAlignment: MainAxisAlignment.center,
-    //           children: [
-    //             Container(
-    //               margin: const EdgeInsets.symmetric(horizontal: 16),
-    //               padding: const EdgeInsets.symmetric(
-    //                 horizontal: 20,
-    //                 vertical: 20,
-    //               ),
-    //               decoration: BoxDecoration(
-    //                 color: Colors.grey[100],
-    //                 borderRadius: BorderRadius.circular(16),
-    //                 border: Border.all(color: Colors.grey[300]!),
-    //               ),
-    //               child: Column(
-    //                 children: [
-    //                   TextField(
-    //                     controller: _dialNumberController,
-    //                     style: const TextStyle(
-    //                       fontSize: 36,
-    //                       fontWeight: FontWeight.bold,
-    //                     ),
-    //                     textAlign: TextAlign.center,
-    //                     keyboardType: TextInputType.phone,
-    //                     decoration: const InputDecoration(
-    //                       hintText: '',
-    //                       border: InputBorder.none,
-    //                       contentPadding: EdgeInsets.zero,
-    //                     ),
-    //                   ),
-    //                   if (_currentCallState != null &&
-    //                       _currentCallState != CallState.Idle)
-    //                     Padding(
-    //                       padding: const EdgeInsets.only(top: 12),
-    //                       child: Chip(
-    //                         label: Text(
-    //                           _currentCallState.toString().split('.').last,
-    //                         ),
-    //                         backgroundColor: _getCallStateColor(),
-    //                         labelStyle: const TextStyle(color: Colors.white),
-    //                       ),
-    //                     ),
-    //                 ],
-    //               ),
-    //             ),
-    //             const SizedBox(height: 24),
-    //             Padding(
-    //               padding: const EdgeInsets.symmetric(horizontal: 16),
-    //               child: Column(
-    //                 children: [
-    //                   Row(
-    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-    //                     children: [
-    //                       _circularDialButton('1', ''),
-    //                       _circularDialButton('2', 'ABC'),
-    //                       _circularDialButton('3', 'DEF'),
-    //                     ],
-    //                   ),
-    //                   const SizedBox(height: 16),
-    //                   Row(
-    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-    //                     children: [
-    //                       _circularDialButton('4', 'GHI'),
-    //                       _circularDialButton('5', 'JKL'),
-    //                       _circularDialButton('6', 'MNO'),
-    //                     ],
-    //                   ),
-    //                   const SizedBox(height: 16),
-    //                   Row(
-    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-    //                     children: [
-    //                       _circularDialButton('7', 'PQRS'),
-    //                       _circularDialButton('8', 'TUV'),
-    //                       _circularDialButton('9', 'WXYZ'),
-    //                     ],
-    //                   ),
-    //                   const SizedBox(height: 16),
-    //                   Row(
-    //                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-    //                     children: [
-    //                       _circularDialButton('*', ''),
-    //                       _circularDialButton('0', '+'),
-    //                       _circularDialButton('#', ''),
-    //                     ],
-    //                   ),
-    //                 ],
-    //               ),
-    //             ),
-    //             const SizedBox(height: 30),
-    //             Row(
-    //               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-    //               children: [
-    //                 FloatingActionButton.extended(
-    //                   onPressed: () {
-    //                     _linphonePlugin.toggleSpeaker();
-    //                     _log('Speaker toggled');
-    //                   },
-    //                   icon: const Icon(Icons.volume_up),
-    //                   backgroundColor: Colors.blue[400],
-    //                   label: const SizedBox.shrink(),
-    //                 ),
-    //                 FloatingActionButton(
-    //                   onPressed: isCallActive ? _hangUp : _makeCall,
-    //                   backgroundColor: isCallActive ? Colors.red : Colors.green,
-    //                   child: Icon(
-    //                     isCallActive ? Icons.call_end : Icons.call,
-    //                     size: 32,
-    //                   ),
-    //                 ),
-    //                 if (hasText)
-    //                   FloatingActionButton.extended(
-    //                     onPressed: () {
-    //                       final text = _dialNumberController.text;
-    //                       if (text.isNotEmpty) {
-    //                         _dialNumberController.text = text.substring(
-    //                           0,
-    //                           text.length - 1,
-    //                         );
-    //                       }
-    //                     },
-    //                     icon: const Icon(Icons.backspace),
-    //                     backgroundColor: Colors.grey[400],
-    //                     label: const SizedBox.shrink(),
-    //                   )
-    //                 else
-    //                   const SizedBox(width: 56),
-    //               ],
-    //             ),
-    //             const SizedBox(height: 20),
-    //           ],
-    //         ),
-    //       ),
-    //     ],
-    //   ),
-    // );
+    final bool hasText = _dialNumberController.text.trim().isNotEmpty;
 
     return SafeArea(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final bool smallScreen = constraints.maxHeight < 620;
+          final double height = constraints.maxHeight;
+          final bool tinyScreen = height < 560;
+          final bool smallScreen = height < 660;
 
-          final double keypadButtonSize = smallScreen ? 72 : 88;
-          final double keypadSpacing = smallScreen ? 10 : 18;
-          final double displayFontSize = smallScreen ? 36 : 44;
-          final double cardPadding = smallScreen ? 12 : 20;
+          final double keypadButtonSize = tinyScreen
+              ? 58
+              : (smallScreen ? 68 : 82);
+          final double keypadSpacing = tinyScreen ? 6 : (smallScreen ? 9 : 14);
+          final double displayFontSize = tinyScreen
+              ? 28
+              : (smallScreen ? 34 : 40);
+          final double pagePadding = tinyScreen ? 8 : 12;
+          final double actionButtonSize = tinyScreen ? 48 : 56;
 
           return SingleChildScrollView(
-            child: Padding(
-              padding: EdgeInsets.all(smallScreen ? 10 : 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.all(cardPadding),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Column(
+            physics: const AlwaysScrollableScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  pagePadding,
+                  pagePadding,
+                  pagePadding,
+                  pagePadding + 8,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          _dialNumberController.text.isEmpty
-                              ? 'Enter number'
-                              : _dialNumberController.text,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: displayFontSize,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        _buildNumberDisplayCard(
+                          displayFontSize: displayFontSize,
+                          compact: tinyScreen,
                         ),
 
-                        const SizedBox(height: 12),
+                        SizedBox(height: keypadSpacing + 4),
 
-                        if (_callInProgress ||
-                            (_currentCallState != null &&
-                                _currentCallState != CallState.Idle &&
-                                _currentCallState != CallState.End &&
-                                _currentCallState != CallState.Error))
-                          ElevatedButton(
-                            onPressed: _hangUp,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.grey,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 12,
-                              ),
-                            ),
-                            child: const Text('End'),
-                          ),
+                        _buildKeypadResponsive(
+                          buttonSize: keypadButtonSize,
+                          spacing: keypadSpacing,
+                        ),
                       ],
                     ),
-                  ),
 
-                  SizedBox(height: keypadSpacing),
+                    SizedBox(height: keypadSpacing + 6),
 
-                  _buildKeypadResponsive(
-                    buttonSize: keypadButtonSize,
-                    spacing: keypadSpacing,
-                  ),
-                ],
+                    _buildDialerActions(
+                      isCallActive: isCallActive,
+                      hasText: hasText,
+                      buttonSize: actionButtonSize,
+                    ),
+                  ],
+                ),
               ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildNumberDisplayCard({
+    required double displayFontSize,
+    required bool compact,
+  }) {
+    final bool showStatus =
+        _currentCallState != null &&
+        _currentCallState != CallState.Idle &&
+        _currentCallState != CallState.End;
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 16,
+        vertical: compact ? 10 : 16,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.grey.shade300),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _dialNumberController,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.phone,
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: displayFontSize,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.0,
+            ),
+            decoration: InputDecoration(
+              hintText: 'Enter number',
+              hintStyle: TextStyle(
+                color: Colors.grey.shade400,
+                fontSize: compact ? 24 : 30,
+                fontWeight: FontWeight.w500,
+              ),
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+
+          if (showStatus) ...[
+            SizedBox(height: compact ? 8 : 12),
+            Chip(
+              label: Text(_currentCallState.toString().split('.').last),
+              backgroundColor: _getCallStateColor(),
+              labelStyle: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+
+          if (_debugMessage.isNotEmpty) ...[
+            SizedBox(height: compact ? 4 : 8),
+            Text(
+              _debugMessage,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: compact ? 11 : 12,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1345,43 +1418,37 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildDialButtonResponsive('1', '', buttonSize),
-            _buildDialButtonResponsive('2', 'ABC', buttonSize),
-            _buildDialButtonResponsive('3', 'DEF', buttonSize),
-          ],
-        ),
+        _keypadRow([
+          _buildDialButtonResponsive('1', '', buttonSize),
+          _buildDialButtonResponsive('2', 'ABC', buttonSize),
+          _buildDialButtonResponsive('3', 'DEF', buttonSize),
+        ]),
         SizedBox(height: spacing),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildDialButtonResponsive('4', 'GHI', buttonSize),
-            _buildDialButtonResponsive('5', 'JKL', buttonSize),
-            _buildDialButtonResponsive('6', 'MNO', buttonSize),
-          ],
-        ),
+        _keypadRow([
+          _buildDialButtonResponsive('4', 'GHI', buttonSize),
+          _buildDialButtonResponsive('5', 'JKL', buttonSize),
+          _buildDialButtonResponsive('6', 'MNO', buttonSize),
+        ]),
         SizedBox(height: spacing),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildDialButtonResponsive('7', 'PQRS', buttonSize),
-            _buildDialButtonResponsive('8', 'TUV', buttonSize),
-            _buildDialButtonResponsive('9', 'WXYZ', buttonSize),
-          ],
-        ),
+        _keypadRow([
+          _buildDialButtonResponsive('7', 'PQRS', buttonSize),
+          _buildDialButtonResponsive('8', 'TUV', buttonSize),
+          _buildDialButtonResponsive('9', 'WXYZ', buttonSize),
+        ]),
         SizedBox(height: spacing),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildDialButtonResponsive('*', '', buttonSize),
-            _buildDialButtonResponsive('0', '+', buttonSize),
-            _buildDialButtonResponsive('#', '', buttonSize),
-          ],
-        ),
-        SizedBox(height: spacing),
+        _keypadRow([
+          _buildDialButtonResponsive('*', '', buttonSize),
+          _buildDialButtonResponsive('0', '+', buttonSize),
+          _buildDialButtonResponsive('#', '', buttonSize),
+        ]),
       ],
+    );
+  }
+
+  Widget _keypadRow(List<Widget> children) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: children,
     );
   }
 
@@ -1393,46 +1460,163 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     return SizedBox(
       width: size,
       height: size,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(size / 2),
-        onTap: () {
-          setState(() {
-            _dialNumberController.text += number;
-          });
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white,
-            border: Border.all(color: Colors.grey.shade300),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(size / 2),
+          onTap: () {
+            final oldText = _dialNumberController.text;
+            final selection = _dialNumberController.selection;
+            final cursorPosition = selection.baseOffset;
+
+            if (cursorPosition >= 0 && cursorPosition <= oldText.length) {
+              final newText = oldText.replaceRange(
+                cursorPosition,
+                cursorPosition,
                 number,
-                style: TextStyle(
-                  fontSize: size < 80 ? 32 : 38,
-                  fontWeight: FontWeight.bold,
+              );
+              _dialNumberController.value = TextEditingValue(
+                text: newText,
+                selection: TextSelection.collapsed(
+                  offset: cursorPosition + number.length,
                 ),
-              ),
-              if (letters.isNotEmpty)
+              );
+            } else {
+              _dialNumberController.text = oldText + number;
+              _dialNumberController.selection = TextSelection.collapsed(
+                offset: _dialNumberController.text.length,
+              );
+            }
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+              border: Border.all(color: Colors.grey.shade300, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 5,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
                 Text(
-                  letters,
+                  number,
                   style: TextStyle(
-                    fontSize: size < 80 ? 10 : 12,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.w600,
+                    fontSize: size < 65 ? 26 : (size < 75 ? 32 : 38),
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-            ],
+                if (letters.isNotEmpty)
+                  Text(
+                    letters,
+                    style: TextStyle(
+                      fontSize: size < 65 ? 8 : 10,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDialerActions({
+    required bool isCallActive,
+    required bool hasText,
+    required double buttonSize,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _dialerRoundAction(
+          icon: Icons.volume_up,
+          color: Colors.blue,
+          size: buttonSize,
+          onPressed: () {
+            _linphonePlugin.toggleSpeaker();
+            _log('Speaker toggled');
+          },
+        ),
+
+        _dialerRoundAction(
+          icon: isCallActive ? Icons.call_end : Icons.call,
+          color: isCallActive ? Colors.red : Colors.green,
+          size: buttonSize + 10,
+          onPressed: isCallActive
+              ? _hangUp
+              : hasText
+              ? _makeCall
+              : null,
+        ),
+
+        _dialerRoundAction(
+          icon: Icons.backspace,
+          color: Colors.grey,
+          size: buttonSize,
+          onPressed: hasText
+              ? () {
+                  final text = _dialNumberController.text;
+                  final selection = _dialNumberController.selection;
+                  final cursorPosition = selection.baseOffset;
+
+                  if (cursorPosition > 0 && cursorPosition <= text.length) {
+                    final newText = text.replaceRange(
+                      cursorPosition - 1,
+                      cursorPosition,
+                      '',
+                    );
+                    _dialNumberController.value = TextEditingValue(
+                      text: newText,
+                      selection: TextSelection.collapsed(
+                        offset: cursorPosition - 1,
+                      ),
+                    );
+                  } else if (text.isNotEmpty) {
+                    _dialNumberController.text = text.substring(
+                      0,
+                      text.length - 1,
+                    );
+                    _dialNumberController.selection = TextSelection.collapsed(
+                      offset: _dialNumberController.text.length,
+                    );
+                  }
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _dialerRoundAction({
+    required IconData icon,
+    required Color color,
+    required double size,
+    required VoidCallback? onPressed,
+  }) {
+    final bool enabled = onPressed != null;
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Material(
+        color: enabled ? color : Colors.grey.shade300,
+        shape: const CircleBorder(),
+        elevation: enabled ? 4 : 0,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: Icon(
+            icon,
+            color: enabled ? Colors.white : Colors.grey.shade600,
+            size: size * 0.48,
           ),
         ),
       ),
