@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/services.dart';
 import 'package:linphone_flutter_plugin/CallLog.dart';
 import 'package:linphone_flutter_plugin/call_state.dart';
@@ -32,12 +33,24 @@ class LinphoneFlutterPlugin {
     return registrationChannel.receiveBroadcastStream();
   }
 
-  Future<void> login(
-      {required String userName,
-      required String domain,
-      required String password}) async {
-    var data = {"userName": userName, "domain": domain, "password": password};
-    return await _channel.invokeMethod("login", data);
+  Future<dynamic> login({
+    required String userName,
+    required String domain,
+    required String password,
+    String? proxyHost,
+    int? proxyPort,
+    String? transport,
+  }) async {
+    final data = {
+      'userName': userName,
+      'domain': domain,
+      'password': password,
+      'proxyHost': proxyHost ?? domain,
+      'proxyPort': proxyPort ?? 5061,
+      'transport': transport ?? 'tls',
+    };
+
+    return await _channel.invokeMethod('login', data);
   }
 
   Future<void> toggleSpeaker() async {
@@ -49,7 +62,7 @@ class LinphoneFlutterPlugin {
   }
 
   Future<void> call({required String number}) async {
-    var data = {"number": number};
+    final data = {"number": number};
     return await _channel.invokeMethod("call", data);
   }
 
@@ -66,12 +79,12 @@ class LinphoneFlutterPlugin {
   }
 
   Future<bool> callTransfer({required String destination}) async {
-    var data = {"destination": destination};
+    final data = {"destination": destination};
     return await _channel.invokeMethod("transfer", data);
   }
 
   Future<CallLogs> callLogs() async {
-    var list = await _channel.invokeMethod("call_logs");
+    final list = await _channel.invokeMethod("call_logs");
     return CallLogs.fromJson(jsonDecode(list));
   }
 
@@ -86,6 +99,7 @@ class LinphoneFlutterPlugin {
   Stream<LoginState> addLoginListener() {
     return _loginEventListener.receiveBroadcastStream().map((event) {
       LoginState loginState = LoginState.none;
+
       if (event == "Ok") {
         loginState = LoginState.ok;
       } else if (event == "Progress") {
@@ -97,6 +111,7 @@ class LinphoneFlutterPlugin {
       } else if (event == "Failed") {
         loginState = LoginState.failed;
       }
+
       return loginState;
     });
   }
@@ -104,7 +119,9 @@ class LinphoneFlutterPlugin {
   Stream<CallState> addCallStateListener() {
     return _callEventListener.receiveBroadcastStream().map((event) {
       print("Event: $event");
+
       CallState callState = CallState.idle;
+
       if (event == "IncomingReceived") {
         callState = CallState.IncomingReceived;
       } else if (event == "OutgoingInit") {
@@ -132,6 +149,7 @@ class LinphoneFlutterPlugin {
       } else if (event == "Error") {
         callState = CallState.error;
       }
+
       return callState;
     });
   }

@@ -35,12 +35,42 @@ public class MethodChannelHandler extends FlutterActivity implements MethodChann
     public void onMethodCall(@NonNull MethodCall call, @NonNull MethodChannel.Result result) {
         switch (call.method) {
 
+            // case "login":
+            //     Map data = (Map) call.arguments;
+            //     String userName = (String) data.get("userName");
+            //     String domain = (String) data.get("domain");
+            //     String password = (String) data.get("password");
+            //     linPhoneHelper.login(userName, domain, password);
+            //     result.success("Success");
+            //     break;
             case "login":
                 Map data = (Map) call.arguments;
+
                 String userName = (String) data.get("userName");
                 String domain = (String) data.get("domain");
                 String password = (String) data.get("password");
-                linPhoneHelper.login(userName, domain, password);
+
+                String proxyHost = data.get("proxyHost") != null
+                        ? (String) data.get("proxyHost")
+                        : domain;
+
+                int proxyPort = data.get("proxyPort") != null
+                        ? ((Number) data.get("proxyPort")).intValue()
+                        : 5061;
+
+                String transport = data.get("transport") != null
+                        ? (String) data.get("transport")
+                        : "tls";
+
+                linPhoneHelper.login(
+                        userName,
+                        domain,
+                        password,
+                        proxyHost,
+                        proxyPort,
+                        transport
+                );
+
                 result.success("Success");
                 break;
             case "remove_listener":
@@ -51,9 +81,13 @@ public class MethodChannelHandler extends FlutterActivity implements MethodChann
                 linPhoneHelper.removeCallListener();
                 result.success(true);
                 break;
+            // case "hangUp":
+            //     linPhoneHelper.hangUp();
+            //     result.success(true);
+            //     break;
             case "hangUp":
                 linPhoneHelper.hangUp();
-                result.success(true);
+                result.success("Success");
                 break;
             case "mute":
                 boolean isMuted = linPhoneHelper.toggleMute();

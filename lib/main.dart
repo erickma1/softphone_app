@@ -125,6 +125,8 @@ enum CallState {
   Error,
 }
 
+enum SipTransportOption { tls5061, tcp5080, udp5060 }
+
 // --------------------- Main Softphone Home Page ---------------------
 class SoftphoneHomePage extends StatefulWidget {
   const SoftphoneHomePage({super.key});
@@ -136,6 +138,7 @@ class SoftphoneHomePage extends StatefulWidget {
 class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final LinphoneFlutterPlugin _linphonePlugin = LinphoneFlutterPlugin();
   // int _selectedIndex = 0; // 0: Dialer, 1: Contacts, 2: Call Log, 3: Settings
+
   int _selectedIndex = 0;
 
   // SIP settings
@@ -143,6 +146,13 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final _sipPasswordController = TextEditingController();
   final _sipDomainController = TextEditingController();
   final _dialNumberController = TextEditingController();
+
+  SipTransportOption _selectedSipTransport = SipTransportOption.tls5061;
+
+  String _sipIdentityDomain = '69.169.108.208';
+  String _sipProxyHost = 'sip.numbersixlimited.com';
+  int _sipProxyPort = 5061;
+  String _sipTransport = 'tls';
 
   bool _isRegistered = false;
   RegistrationState _registrationState = RegistrationState.None;
@@ -193,6 +203,8 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         _debugMessage = 'SIP account loaded. Registering automatically...';
       });
 
+      _applySipTransport(SipTransportOption.tls5061);
+
       // Register SIP automatically after app login.
       await _login();
     } else {
@@ -202,6 +214,37 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
         _isRegistered = false;
       });
     }
+  }
+
+  void _applySipTransport(SipTransportOption option) {
+    setState(() {
+      _selectedSipTransport = option;
+
+      switch (option) {
+        case SipTransportOption.tls5061:
+          _sipIdentityDomain = '69.169.108.208';
+          _sipProxyHost = 'sip.numbersixlimited.com';
+          _sipProxyPort = 5061;
+          _sipTransport = 'tls';
+          break;
+
+        case SipTransportOption.tcp5080:
+          _sipIdentityDomain = '69.169.108.208';
+          _sipProxyHost = '69.169.108.208';
+          _sipProxyPort = 5080;
+          _sipTransport = 'tcp';
+          break;
+
+        case SipTransportOption.udp5060:
+          _sipIdentityDomain = '69.169.108.208';
+          _sipProxyHost = '69.169.108.208';
+          _sipProxyPort = 5060;
+          _sipTransport = 'udp';
+          break;
+      }
+
+      _sipDomainController.text = _sipIdentityDomain;
+    });
   }
 
   @override
@@ -407,45 +450,93 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
     }
   }
 
+  // Future<void> _login() async {
+  //   final username = _sipUsernameController.text.trim();
+  //   final password = _sipPasswordController.text.trim();
+  //   final domain = _sipDomainController.text.trim();
+
+  //   if (username.isEmpty || password.isEmpty || domain.isEmpty) {
+  //     _log('Please fill all fields');
+  //     return;
+  //   }
+
+  //   setState(() {
+  //     _registrationState = RegistrationState.Progress;
+  //     _isRegistered = false;
+  //     _debugMessage = 'Attempting SIP registration...';
+  //   });
+
+  //   try {
+  //     await _linphonePlugin.login(
+  //       userName: username,
+  //       domain: domain,
+  //       password: password,
+  //     );
+  //     Future.delayed(const Duration(seconds: 15), () {
+  //       if (mounted && _registrationState == RegistrationState.Progress) {
+  //         setState(() {
+  //           _registrationState = RegistrationState.Failed;
+  //           _isRegistered = false;
+  //           _debugMessage = 'Registration timeout';
+  //         });
+  //       }
+  //     });
+  //   } catch (e) {
+  //     setState(() {
+  //       _registrationState = RegistrationState.Failed;
+  //       _isRegistered = false;
+  //       // _debugMessage = 'Registration error: ${e.toString()}';
+  //       debugPrint('[SIP Registration Error] $e');
+  //       _debugMessage =
+  //           'SIP registration failed. Please check your connection and try again.';
+  //     });
+  //   }
+  // }
+
   Future<void> _login() async {
     final username = _sipUsernameController.text.trim();
     final password = _sipPasswordController.text.trim();
-    final domain = _sipDomainController.text.trim();
 
-    if (username.isEmpty || password.isEmpty || domain.isEmpty) {
-      _log('Please fill all fields');
+    if (username.isEmpty || password.isEmpty) {
+      _log('SIP account is missing. Please log in again.');
       return;
     }
 
     setState(() {
       _registrationState = RegistrationState.Progress;
       _isRegistered = false;
-      _debugMessage = 'Attempting SIP registration...';
+      _debugMessage =
+          'Registering with ${_sipTransport.toUpperCase()} on port $_sipProxyPort...';
     });
 
     try {
       await _linphonePlugin.login(
         userName: username,
-        domain: domain,
+        domain: _sipIdentityDomain,
         password: password,
+        proxyHost: _sipProxyHost,
+        proxyPort: _sipProxyPort,
+        transport: _sipTransport,
       );
+
       Future.delayed(const Duration(seconds: 15), () {
         if (mounted && _registrationState == RegistrationState.Progress) {
           setState(() {
             _registrationState = RegistrationState.Failed;
             _isRegistered = false;
-            _debugMessage = 'Registration timeout';
+            _debugMessage = 'Registration timeout. Try another SIP transport.';
           });
         }
       });
     } catch (e) {
+      debugPrint('[SIP Registration Error] $e');
+
+      if (!mounted) return;
+
       setState(() {
         _registrationState = RegistrationState.Failed;
         _isRegistered = false;
-        // _debugMessage = 'Registration error: ${e.toString()}';
-        debugPrint('[SIP Registration Error] $e');
-        _debugMessage =
-            'SIP registration failed. Please check your connection and try again.';
+        _debugMessage = 'SIP registration failed. Try another SIP transport.';
       });
     }
   }
@@ -2000,6 +2091,24 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
 
                   Row(
                     children: [
+                      const Icon(Icons.security, color: Colors.blueGrey),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Current Transport: ${_sipTransport.toUpperCase()} $_sipProxyPort',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
                       const Icon(Icons.info_outline, color: Colors.grey),
                       const SizedBox(width: 12),
                       Expanded(
@@ -2029,7 +2138,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                 ),
               ),
 
-            if (_registrationState == RegistrationState.Failed)
+            if (_registrationState == RegistrationState.Failed) ...[
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -2038,6 +2147,92 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
                   label: const Text('Retry SIP Registration'),
                 ),
               ),
+              const SizedBox(height: 12),
+            ],
+
+            const Text(
+              'SIP Transport',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 8),
+
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Column(
+                children: [
+                  RadioListTile<SipTransportOption>(
+                    title: const Text('TLS 5061'),
+                    subtitle: const Text('Recommended / default'),
+                    value: SipTransportOption.tls5061,
+                    groupValue: _selectedSipTransport,
+                    onChanged: (value) {
+                      if (value != null) {
+                        _applySipTransport(value);
+                      }
+                    },
+                  ),
+
+                  RadioListTile<SipTransportOption>(
+                    title: const Text('TCP 5080'),
+                    subtitle: const Text(
+                      'Fallback for networks blocking normal SIP',
+                    ),
+                    value: SipTransportOption.tcp5080,
+                    groupValue: _selectedSipTransport,
+                    onChanged: (value) {
+                      if (value != null) {
+                        _applySipTransport(value);
+                      }
+                    },
+                  ),
+
+                  RadioListTile<SipTransportOption>(
+                    title: const Text('UDP 5060'),
+                    subtitle: const Text('Compatibility mode'),
+                    value: SipTransportOption.udp5060,
+                    groupValue: _selectedSipTransport,
+                    onChanged: (value) {
+                      if (value != null) {
+                        _applySipTransport(value);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  setState(() {
+                    _isRegistered = false;
+                    _registrationState = RegistrationState.Progress;
+                    _debugMessage =
+                        'Re-registering with ${_sipTransport.toUpperCase()} on port $_sipProxyPort...';
+                  });
+
+                  await _login();
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Re-register SIP'),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              'Current: ${_sipTransport.toUpperCase()} $_sipProxyPort',
+              style: TextStyle(color: Colors.grey[700], fontSize: 13),
+            ),
 
             const SizedBox(height: 24),
             const Divider(),
@@ -2086,7 +2281,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
             const SizedBox(height: 24),
 
             Text(
-              'Your SIP server credentials are managed automatically',
+              'Your SIP server credentials are managed automatically.',
               style: TextStyle(color: Colors.grey[600], fontSize: 13),
             ),
           ],

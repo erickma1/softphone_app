@@ -51,34 +51,149 @@ public class LinPhoneHelper {
 
 
 
-public void login(String userName, String domain, String password) {
+// public void login(String userName, String domain, String password) {
 
+//     this.domain = domain;
+//     this.userName = userName;
+//     this.password = password;
+
+//     Factory factory = Factory.instance();
+//     factory.setDebugMode(true, "LinPhoneSDKTest");
+
+//     core = factory.createCore(null, null, context);
+
+//     // Better transport for office WiFi
+//     // TransportType transportType = TransportType.Tcp;
+//     // TransportType transportType = TransportType.Tls;
+//     TransportType transportType = TransportType.Udp;
+
+
+//     // Disable problematic IPv6
+//     core.setIpv6Enabled(false);
+
+//     // Keep SIP alive
+//     // core.enableKeepAlive(true);
+//     core.setNetworkReachable(true);
+
+//     // Dynamic RTP ports
+//     core.setAudioPort(-1);
+
+//     // NAT traversal
+//     core.setNatPolicy(core.createNatPolicy());
+//     core.getNatPolicy().setStunEnabled(true);
+//     core.getNatPolicy().setIceEnabled(true);
+//     core.getNatPolicy().setStunServer("stun.l.google.com:19302");
+
+//     AuthInfo authInfo = Factory.instance().createAuthInfo(
+//             userName,
+//             null,
+//             password,
+//             null,
+//             null,
+//             domain,
+//             null
+//     );
+
+//     AccountParams params = core.createAccountParams();
+
+//     String sipAddress = "sip:" + userName + "@" + domain;
+
+//     Address identity = Factory.instance().createAddress(sipAddress);
+
+//     params.setIdentityAddress(identity);
+
+//     Address address = Factory.instance().createAddress("sip:" + domain);
+
+//     address.setTransport(transportType);
+
+//     params.setServerAddress(address);
+
+//     params.setRegisterEnabled(true);
+
+//     // Registration refresh
+//     params.setExpires(600);
+
+//     Account account = core.createAccount(params);
+
+//     core.addAuthInfo(authInfo);
+
+//     core.addAccount(account);
+
+//     core.setDefaultAccount(account);
+
+//     core.addListener(coreListener);
+
+//     core.start();
+
+//     // No SRTP for now
+//     core.setMediaEncryption(MediaEncryption.None);
+
+//     // Codec restriction
+//     PayloadType[] payloads = core.getAudioPayloadTypes();
+
+//     for (PayloadType pt : payloads) {
+
+//         String mime = pt.getMimeType();
+
+//         pt.enable(false);
+
+//         if (
+//                 mime.equals("PCMU") ||
+//                 mime.equals("PCMA") ||
+//                 mime.equals("telephone-event")
+//         ) {
+//             pt.enable(true);
+//         }
+//     }
+
+//     core.setUserAgent("FlutterSoftphone", "2.0");
+// }
+
+public void login(
+        String userName,
+        String domain,
+        String password,
+        String proxyHost,
+        int proxyPort,
+        String transport
+) {
     this.domain = domain;
     this.userName = userName;
     this.password = password;
 
     Factory factory = Factory.instance();
-    factory.setDebugMode(true, "LinPhoneSDKTest");
+    factory.setDebugMode(true, "NumberSixSoftphone");
+
+    if (core != null) {
+        try {
+            core.stop();
+            core = null;
+        } catch (Exception ignored) {
+        }
+    }
 
     core = factory.createCore(null, null, context);
 
-    // Better transport for office WiFi
-    // TransportType transportType = TransportType.Tcp;
-    // TransportType transportType = TransportType.Tls;
-    TransportType transportType = TransportType.Udp;
+    TransportType transportType;
 
+    if (transport != null && transport.equalsIgnoreCase("tls")) {
+        transportType = TransportType.Tls;
+    } else if (transport != null && transport.equalsIgnoreCase("tcp")) {
+        transportType = TransportType.Tcp;
+    } else {
+        transportType = TransportType.Udp;
+    }
 
-    // Disable problematic IPv6
+    Log.e(TAG, "SIP LOGIN username=" + userName
+            + " domain=" + domain
+            + " proxyHost=" + proxyHost
+            + " proxyPort=" + proxyPort
+            + " transport=" + transport);
+
     core.setIpv6Enabled(false);
-
-    // Keep SIP alive
-    // core.enableKeepAlive(true);
     core.setNetworkReachable(true);
-
-    // Dynamic RTP ports
     core.setAudioPort(-1);
 
-    // NAT traversal
     core.setNatPolicy(core.createNatPolicy());
     core.getNatPolicy().setStunEnabled(true);
     core.getNatPolicy().setIceEnabled(true);
@@ -96,43 +211,41 @@ public void login(String userName, String domain, String password) {
 
     AccountParams params = core.createAccountParams();
 
-    String sipAddress = "sip:" + userName + "@" + domain;
-
-    Address identity = Factory.instance().createAddress(sipAddress);
-
+    // Identity stays as your existing Kamailio auth domain.
+    // Example: sip:1018@69.169.108.208
+    String identityUri = "sip:" + userName + "@" + domain;
+    Address identity = Factory.instance().createAddress(identityUri);
     params.setIdentityAddress(identity);
 
-    Address address = Factory.instance().createAddress("sip:" + domain);
+    // Proxy/server changes depending on selected transport.
+    // TLS example: sip:sip.numbersixlimited.com:5061;transport=tls
+    String serverUri = "sip:" + proxyHost + ":" + proxyPort;
+    Address serverAddress = Factory.instance().createAddress(serverUri);
 
-    address.setTransport(transportType);
+    if (serverAddress == null) {
+        Log.e(TAG, "Invalid SIP proxy address: " + serverUri);
+        loginListener.success("Failed");
+        return;
+    }
 
-    params.setServerAddress(address);
+    serverAddress.setTransport(transportType);
 
+    params.setServerAddress(serverAddress);
     params.setRegisterEnabled(true);
-
-    // Registration refresh
     params.setExpires(600);
 
     Account account = core.createAccount(params);
 
     core.addAuthInfo(authInfo);
-
     core.addAccount(account);
-
     core.setDefaultAccount(account);
-
     core.addListener(coreListener);
 
-    core.start();
-
-    // No SRTP for now
     core.setMediaEncryption(MediaEncryption.None);
 
-    // Codec restriction
     PayloadType[] payloads = core.getAudioPayloadTypes();
 
     for (PayloadType pt : payloads) {
-
         String mime = pt.getMimeType();
 
         pt.enable(false);
@@ -147,6 +260,8 @@ public void login(String userName, String domain, String password) {
     }
 
     core.setUserAgent("FlutterSoftphone", "2.0");
+
+    core.start();
 }
 
     // public void call(String number) {
@@ -221,17 +336,54 @@ public void login(String userName, String domain, String password) {
     }
 
 
+    // public void hangUp() {
+    //     if (core.getCallsNb() == 0) return;
+    //     Call call = null;
+    //     if (core.getCurrentCall() != null) {
+    //         call = core.getCurrentCall();
+    //     } else {
+    //         call = core.getCalls()[0];
+    //     }
+    //     if (call == null) return;
+    //     call.terminate();
+    //     callEventListener.success("Released");
+    // }
     public void hangUp() {
-        if (core.getCallsNb() == 0) return;
-        Call call = null;
-        if (core.getCurrentCall() != null) {
-            call = core.getCurrentCall();
-        } else {
-            call = core.getCalls()[0];
+        try {
+            Log.e(TAG, "HANGUP REQUEST RECEIVED");
+
+            if (core == null) {
+                Log.e(TAG, "HANGUP FAILED: core is null");
+                return;
+            }
+
+            Call currentCall = core.getCurrentCall();
+
+            if (currentCall != null) {
+                Log.e(TAG, "Terminating current call. State=" + currentCall.getState());
+                currentCall.terminate();
+            }
+
+            Call[] calls = core.getCalls();
+
+            if (calls != null && calls.length > 0) {
+                Log.e(TAG, "Active calls found: " + calls.length);
+
+                for (Call call : calls) {
+                    if (call != null) {
+                        Log.e(TAG, "Terminating call from calls list. State=" + call.getState());
+                        call.terminate();
+                    }
+                }
+            } else {
+                Log.e(TAG, "No active call found in core.getCalls()");
+            }
+
+            core.iterate();
+
+        } catch (Exception e) {
+            Log.e(TAG, "HANGUP ERROR: " + e.getMessage(), e);
         }
-        if (call == null) return;
-        call.terminate();
-        callEventListener.success("Released");
     }
 
     public boolean toggleMute() {
@@ -326,41 +478,44 @@ public void login(String userName, String domain, String password) {
             loginListener.success(state.name());
         }
 
-        @Override
-        public void onCallStateChanged(@NonNull Core core, @NonNull Call call, Call.State state, @NonNull String message) {
+    @Override
+        public void onCallStateChanged(
+                @NonNull Core core,
+                @NonNull Call call,
+                Call.State state,
+                @NonNull String message
+        ) {
+            Log.e(TAG, "CALL STATE CHANGED: " + state + " message=" + message);
+
+            try {
+                if (call.getRemoteAddress() != null) {
+                    Log.e(TAG, "CALL REMOTE ADDRESS: " + call.getRemoteAddress().asStringUriOnly());
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Could not read remote address: " + e.getMessage());
+            }
+
             switch (state) {
                 case IncomingReceived:
                     Log.e(TAG, "onCallStateChanged: Incoming Received");
                     callEventListener.success(state.name());
                     break;
+
                 case OutgoingInit:
                     Log.e(TAG, "onCallStateChanged: Outgoing init");
                     callEventListener.success(state.name());
                     break;
+
                 case OutgoingProgress:
                     Log.e(TAG, "onCallStateChanged: Outgoing Progress");
                     callEventListener.success(state.name());
                     break;
+
                 case OutgoingRinging:
                     Log.e(TAG, "onCallStateChanged: Ringing");
                     callEventListener.success(state.name());
                     break;
-                // case Connected:
-                //     Log.e(TAG, "onCallStateChanged: Connected");
-                //     callEventListener.success(state.name());
-                //     break;
-                // case StreamsRunning:
-                //     Log.e(TAG, "onCallStateChanged: StreamsRunning");
-                //     callEventListener.success(state.name());
-                //     break;
-                // case Paused:
-                //     Log.e(TAG, "onCallStateChanged: Paused");
-                //     callEventListener.success(state.name());
-                //     break;
-                // case PausedByRemote:
-                //     Log.e(TAG, "onCallStateChanged: PausedByRemote");
-                //     callEventListener.success(state.name());
-                //     break;
+
                 case Connected:
                     Log.e(TAG, "onCallStateChanged: Connected");
                     try {
@@ -381,17 +536,6 @@ public void login(String userName, String domain, String password) {
                     callEventListener.success(state.name());
                     break;
 
-                // case Paused:
-                //     Log.e(TAG, "onCallStateChanged: Paused - unexpected local hold detected, resuming call");
-                //     try {
-                //         call.resume();
-                //         call.setMicrophoneMuted(false);
-                //         callEventListener.success("AutoResumedFromPaused");
-                //     } catch (Exception e) {
-                //         Log.e(TAG, "Failed to auto-resume paused call: " + e);
-                //         callEventListener.success(state.name());
-                //     }
-                //     break;
                 case Paused:
                     Log.e(TAG, "onCallStateChanged: Paused - call is on hold, not auto-resuming immediately");
                     callEventListener.success(state.name());
@@ -401,26 +545,38 @@ public void login(String userName, String domain, String password) {
                     Log.e(TAG, "onCallStateChanged: PausedByRemote");
                     callEventListener.success(state.name());
                     break;
+
                 case Updating:
                     Log.e(TAG, "onCallStateChanged: Updating");
                     callEventListener.success(state.name());
                     break;
+
                 case UpdatedByRemote:
                     Log.e(TAG, "onCallStateChanged: UpdatedByRemote");
                     callEventListener.success(state.name());
                     break;
+
                 case Released:
                     Log.e(TAG, "onCallStateChanged: Released");
                     callEventListener.success(state.name());
                     break;
+
                 case EarlyUpdatedByRemote:
                     Log.e(TAG, "onCallStateChanged: EarlyUpdatedByRemote");
                     callEventListener.success(state.name());
+                    break;
+
                 case Error:
                     Log.e(TAG, "onCallStateChanged: Error");
                     callEventListener.success(state.name());
                     break;
+
+                default:
+                    Log.e(TAG, "onCallStateChanged: Other state: " + state);
+                    callEventListener.success(state.name());
+                    break;
             }
-        }
-    };
+        }    
+
+};
 }
