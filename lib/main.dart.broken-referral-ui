@@ -1,0 +1,2818 @@
+import 'package:flutter/material.dart';
+import 'package:linphone_flutter_plugin/linphoneflutterplugin.dart';
+// import 'package:permission_handler/permission_handler.dart';
+// import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
+import 'package:flutter_contacts/flutter_contacts.dart' as fc;
+
+// Import your actual auth screens and service (these exist in separate files)
+import 'screens/login_screen.dart';
+import 'screens/register_screen.dart';
+import 'services/auth_service.dart';
+import 'package:url_launcher/url_launcher.dart';
+// import 'package:firebase_core/firebase_core.dart';
+// import 'firebase_options.dart';
+
+// void main() async {
+//   WidgetsFlutterBinding.ensureInitialized();
+//   await Firebase.initializeApp();
+//   runApp(const MySoftphoneApp());
+// }
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MySoftphoneApp());
+}
+
+class MySoftphoneApp extends StatelessWidget {
+  const MySoftphoneApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Number 6 Softphone',
+      theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+      home: const SplashScreen(),
+      routes: {
+        '/login': (_) => const LoginScreen(),
+        '/register': (_) => const RegisterScreen(),
+        '/home': (_) => const SoftphoneHomePage(),
+      },
+    );
+  }
+}
+
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    final auth = AuthService();
+    final token = await auth.getToken();
+    await Future.delayed(const Duration(seconds: 1));
+    if (mounted) {
+      if (token != null) {
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.phone, size: 64, color: Colors.blue[600]),
+            const SizedBox(height: 16),
+            const Text('Number 6 Softphone'),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --------------------- Softphone Models & Enums ---------------------
+class CallLogEntry {
+  final String number;
+  final String status;
+  final DateTime date;
+  final int duration;
+  final bool answered;
+
+  CallLogEntry({
+    required this.number,
+    required this.status,
+    required this.date,
+    required this.duration,
+    required this.answered,
+  });
+
+  String getDurationString() {
+    if (!answered || duration == 0) return '';
+    final minutes = duration ~/ 60;
+    final seconds = duration % 60;
+    if (minutes == 0) return '${seconds}s';
+    if (seconds == 0) return '${minutes}m';
+    return '${minutes}m ${seconds}s';
+  }
+}
+
+enum RegistrationState { None, Progress, Ok, Failed }
+
+enum CallState {
+  Idle,
+  IncomingReceived,
+  Dialing,
+  Ringing,
+  Connected,
+  StreamsRunning,
+  End,
+  Error,
+}
+
+enum SipTransportOption { tls5061, tcp5080, udp5060 }
+
+// --------------------- Main Softphone Home Page ---------------------
+class SoftphoneHomePage extends StatefulWidget {
+  const SoftphoneHomePage({super.key});
+
+  @override
+  State<SoftphoneHomePage> createState() => _SoftphoneHomePageState();
+}
+
+class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
+  final TextEditingController _referralCodeController = TextEditingController();
+  bool _isLoadingReferralStatus = false;
+  bool _isApplyingReferralCode = false;
+  Map<String, dynamic>? _referralStatus;
+  String _referralMessage = '';
+
+  final LinphoneFlutterPlugin _linphonePlugin = LinphoneFlutterPlugin();
+  // int _selectedIndex = 0; // 0: Dialer, 1: Contacts, 2: Call Log, 3: Settings
+
+  int _selectedIndex = 0;
+
+  // SIP settings
+  final _sipUsernameController = TextEditingController();
+  final _sipPasswordController = TextEditingController();
+  final _sipDomainController = TextEditingController();
+  final _dialNumberController = TextEditingController();
+
+  SipTransportOption _selectedSipTransport = SipTransportOption.tls5061;
+
+  String _sipIdentityDomain = '69.169.108.208';
+  String _sipProxyHost = 'sip.numbersixlimited.com';
+  int _sipProxyPort = 5061;
+  String _sipTransport = 'tls';
+
+  bool _isRegistered = false;
+  RegistrationState _registrationState = RegistrationState.None;
+  String _registrationError = '';
+  CallState? _currentCallState;
+  String _debugMessage = '';
+
+  DateTime? _callStartTime;
+  int _callDuration = 0;
+  String? _currentCallNumber;
+  List<CallLogEntry> _callLogs = [];
+  bool _isOutgoingCall = false;
+
+  // This allows us to show the red end-call button immediately
+  // after dialing, even before the called party answers.
+  bool _callInProgress = false;
+
+  // Contacts
+  List<fc.Contact> _contacts = [];
+  List<fc.Contact> _filteredContacts = [];
+  final TextEditingController _searchController = TextEditingController();
+  Future<List<fc.Contact>>? _contactsFuture;
+
+  // Wallet and server CDRs
+  Map<String, dynamic>? _walletBalance;
+  List<dynamic> _topups = [];
+  List<dynamic> _serverCdrs = [];
+
+  bool _walletLoading = false;
+  bool _historyLoading = false;
+
+  String? _walletError;
+  String? _historyError;
+
+  Future<void> _loadSavedSipDetails() async {
+    final auth = AuthService();
+    final sip = await auth.getSipDetails();
+
+    final username = sip['username'];
+    final password = sip['password'];
+    final domain = sip['domain'];
+
+    if (username != null && password != null && domain != null) {
+      setState(() {
+        _sipUsernameController.text = username.toString();
+        _sipPasswordController.text = password.toString();
+        _sipDomainController.text = domain.toString();
+        _debugMessage = 'SIP account loaded. Registering automatically...';
+      });
+
+      _applySipTransport(SipTransportOption.tls5061);
+
+      // Register SIP automatically after app login.
+      await _login();
+    } else {
+      setState(() {
+        _debugMessage = 'No SIP account found for this user';
+        _registrationState = RegistrationState.Failed;
+        _isRegistered = false;
+      });
+    }
+  }
+
+  void _applySipTransport(SipTransportOption option) {
+    setState(() {
+      _selectedSipTransport = option;
+
+      switch (option) {
+        case SipTransportOption.tls5061:
+          _sipIdentityDomain = '69.169.108.208';
+          _sipProxyHost = 'sip.numbersixlimited.com';
+          _sipProxyPort = 5061;
+          _sipTransport = 'tls';
+          break;
+
+        case SipTransportOption.tcp5080:
+          _sipIdentityDomain = '69.169.108.208';
+          _sipProxyHost = '69.169.108.208';
+          _sipProxyPort = 5080;
+          _sipTransport = 'tcp';
+          break;
+
+        case SipTransportOption.udp5060:
+          _sipIdentityDomain = '69.169.108.208';
+          _sipProxyHost = '69.169.108.208';
+          _sipProxyPort = 5060;
+          _sipTransport = 'udp';
+          break;
+      }
+
+      _sipDomainController.text = _sipIdentityDomain;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _initAndSetup();
+    _loadSavedSipDetails();
+    _loadWalletData();
+    _loadReferralStatus();
+    _loadServerCdrs();
+    _dialNumberController.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _searchController.addListener(_filterContacts);
+    //_contactsFuture = _autoLoadContacts();
+  }
+
+  Future<void> _initAndSetup() async {
+    await _requestPermissions();
+
+    _linphonePlugin.addCallStateListener().listen((dynamic state) {
+      final callState = _convertCallState(state);
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentCallState = callState;
+
+        if (callState == CallState.Dialing ||
+            callState == CallState.Ringing ||
+            callState == CallState.Connected ||
+            callState == CallState.StreamsRunning ||
+            callState == CallState.IncomingReceived) {
+          _callInProgress = true;
+        }
+      });
+
+      _log('Call state changed: $callState');
+
+      if ((callState == CallState.Connected ||
+              callState == CallState.StreamsRunning) &&
+          _callStartTime == null) {
+        _callStartTime = DateTime.now();
+        _log('Call connected');
+      }
+
+      if (callState == CallState.IncomingReceived) {
+        _isOutgoingCall = false;
+        _currentCallNumber = 'Incoming call';
+        _showIncomingCallDialog();
+      }
+
+      if (callState == CallState.End || callState == CallState.Error) {
+        _handleCallEnd();
+      }
+    });
+
+    _linphonePlugin.addLoginListener().listen((dynamic state) {
+      _log('Registration state: $state');
+      if (state.toString().toLowerCase().contains('ok')) {
+        setState(() {
+          _registrationState = RegistrationState.Ok;
+          _isRegistered = true;
+          _debugMessage = 'Registration confirmed';
+        });
+      } else if (state.toString().toLowerCase().contains('progress')) {
+        setState(() {
+          _registrationState = RegistrationState.Progress;
+        });
+      } else if (state.toString().toLowerCase().contains('failed')) {
+        setState(() {
+          _registrationState = RegistrationState.Failed;
+          _isRegistered = false;
+          _debugMessage = 'Registration failed';
+        });
+      }
+    });
+  }
+
+  void _handleCallEnd() {
+    String numberToLog =
+        _currentCallNumber ?? _dialNumberController.text.trim();
+    if (numberToLog.isEmpty || numberToLog == 'Incoming call')
+      numberToLog = 'Unknown';
+
+    if (_callStartTime != null && _currentCallState == CallState.Connected) {
+      _callDuration = DateTime.now().difference(_callStartTime!).inSeconds;
+      if (_callDuration > 1) {
+        _addCallLog(
+          numberToLog,
+          _isOutgoingCall ? 'Outgoing' : 'Incoming',
+          _callDuration,
+          true,
+        );
+      } else {
+        _addCallLog(
+          numberToLog,
+          _isOutgoingCall ? 'Outgoing' : 'Missed',
+          0,
+          false,
+        );
+      }
+    } else {
+      _addCallLog(
+        numberToLog,
+        _isOutgoingCall ? 'Outgoing' : 'Missed',
+        0,
+        false,
+      );
+    }
+
+    // _callStartTime = null;
+    // _callDuration = 0;
+    // _currentCallNumber = null;
+    setState(() {
+      _callStartTime = null;
+      _callDuration = 0;
+      _currentCallNumber = null;
+      _callInProgress = false;
+      _currentCallState = CallState.End;
+    });
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        _loadWalletData();
+        _loadServerCdrs();
+      }
+    });
+  }
+
+  void _addCallLog(String number, String status, int duration, bool answered) {
+    if (number.isEmpty) return;
+    setState(() {
+      _callLogs.insert(
+        0,
+        CallLogEntry(
+          number: number,
+          status: status,
+          date: DateTime.now(),
+          duration: duration,
+          answered: answered,
+        ),
+      );
+      if (_callLogs.length > 100) _callLogs.removeLast();
+    });
+  }
+
+  void _showIncomingCallDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Incoming Call'),
+        content: const Text('You have an incoming call.'),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              _isOutgoingCall = false;
+              await _rejectCall();
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Reject'),
+          ),
+          TextButton(
+            onPressed: () async {
+              _isOutgoingCall = false;
+              await _answerCall();
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Answer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _answerCall() async {
+    try {
+      await _linphonePlugin.answerCall();
+      _log('Call answered');
+    } catch (e) {
+      _log('Failed to answer call: $e');
+    }
+  }
+
+  Future<void> _rejectCall() async {
+    try {
+      await _linphonePlugin.rejectCall();
+      _log('Call rejected');
+    } catch (e) {
+      _log('Failed to reject call: $e');
+    }
+  }
+
+  Future<void> _requestPermissions() async {
+    final statuses = await [
+      ph.Permission.microphone,
+      ph.Permission.camera,
+      ph.Permission.phone,
+    ].request();
+    if (statuses[ph.Permission.microphone] != ph.PermissionStatus.granted) {
+      _log('Microphone permission denied');
+    }
+  }
+
+  // Future<void> _login() async {
+  //   final username = _sipUsernameController.text.trim();
+  //   final password = _sipPasswordController.text.trim();
+  //   final domain = _sipDomainController.text.trim();
+
+  //   if (username.isEmpty || password.isEmpty || domain.isEmpty) {
+  //     _log('Please fill all fields');
+  //     return;
+  //   }
+
+  //   setState(() {
+  //     _registrationState = RegistrationState.Progress;
+  //     _isRegistered = false;
+  //     _debugMessage = 'Attempting SIP registration...';
+  //   });
+
+  //   try {
+  //     await _linphonePlugin.login(
+  //       userName: username,
+  //       domain: domain,
+  //       password: password,
+  //     );
+  //     Future.delayed(const Duration(seconds: 15), () {
+  //       if (mounted && _registrationState == RegistrationState.Progress) {
+  //         setState(() {
+  //           _registrationState = RegistrationState.Failed;
+  //           _isRegistered = false;
+  //           _debugMessage = 'Registration timeout';
+  //         });
+  //       }
+  //     });
+  //   } catch (e) {
+  //     setState(() {
+  //       _registrationState = RegistrationState.Failed;
+  //       _isRegistered = false;
+  //       // _debugMessage = 'Registration error: ${e.toString()}';
+  //       debugPrint('[SIP Registration Error] $e');
+  //       _debugMessage =
+  //           'SIP registration failed. Please check your connection and try again.';
+  //     });
+  //   }
+  // }
+
+  Future<void> _login() async {
+    final username = _sipUsernameController.text.trim();
+    final password = _sipPasswordController.text.trim();
+
+    if (username.isEmpty || password.isEmpty) {
+      _log('SIP account is missing. Please log in again.');
+      return;
+    }
+
+    setState(() {
+      _registrationState = RegistrationState.Progress;
+      _isRegistered = false;
+      _debugMessage =
+          'Registering with ${_sipTransport.toUpperCase()} on port $_sipProxyPort...';
+    });
+
+    try {
+      await _linphonePlugin.login(
+        userName: username,
+        domain: _sipIdentityDomain,
+        password: password,
+        proxyHost: _sipProxyHost,
+        proxyPort: _sipProxyPort,
+        transport: _sipTransport,
+      );
+
+      Future.delayed(const Duration(seconds: 15), () {
+        if (mounted && _registrationState == RegistrationState.Progress) {
+          setState(() {
+            _registrationState = RegistrationState.Failed;
+            _isRegistered = false;
+            _debugMessage = 'Registration timeout. Try another SIP transport.';
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint('[SIP Registration Error] $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _registrationState = RegistrationState.Failed;
+        _isRegistered = false;
+        _debugMessage = 'SIP registration failed. Try another SIP transport.';
+      });
+    }
+  }
+
+  Future<void> _logout() async {
+    try {
+      if (_currentCallState != null &&
+          _currentCallState != CallState.Idle &&
+          _currentCallState != CallState.End) {
+        await _hangUp();
+      }
+      setState(() {
+        _isRegistered = false;
+        _registrationState = RegistrationState.None;
+        _currentCallState = null;
+      });
+      _log('Logged out');
+    } catch (e) {
+      _log('Logout error: $e');
+    }
+  }
+
+  // Future<void> _makeCall() async {
+  //   final number = _dialNumberController.text.trim();
+  //   if (number.isEmpty) {
+  //     _log('Please enter a number');
+  //     return;
+  //   }
+  //   if (!_isRegistered) {
+  //     _log('Not registered');
+  //     return;
+  //   }
+  //   try {
+  //     _isOutgoingCall = true;
+  //     _currentCallNumber = number;
+  //     await _linphonePlugin.call(number: number);
+  //     _log('Calling $number...');
+  //   } catch (e) {
+  //     _log('Failed to call: $e');
+  //   }
+  // }
+  Future<void> _makeCall() async {
+    final number = _dialNumberController.text.trim();
+
+    if (number.isEmpty) {
+      _log('Please enter a number');
+      return;
+    }
+
+    if (!_isRegistered) {
+      _log('SIP is not registered yet. Please wait...');
+      return;
+    }
+
+    try {
+      setState(() {
+        _isOutgoingCall = true;
+        _currentCallNumber = number;
+        _currentCallState = CallState.Dialing;
+        _callInProgress = true;
+        _debugMessage = 'Calling $number...';
+      });
+
+      await _linphonePlugin.call(number: number);
+
+      _log('Calling $number...');
+    } catch (e) {
+      setState(() {
+        _callInProgress = false;
+        _currentCallState = CallState.Error;
+        _currentCallNumber = null;
+      });
+
+      _log('Failed to call: $e');
+    }
+  }
+
+  // Future<void> _hangUp() async {
+  //   try {
+  //     await _linphonePlugin.hangUp();
+  //     _log('Call ended');
+  //   } catch (e) {
+  //     _log('Hang up error: $e');
+  //   }
+  // }
+
+  Future<void> _hangUp() async {
+    try {
+      await _linphonePlugin.hangUp();
+
+      setState(() {
+        _callInProgress = false;
+        _currentCallState = CallState.End;
+      });
+
+      _log('Call ended');
+    } catch (e) {
+      _log('Hang up error: $e');
+
+      // Even if the plugin throws an error, reset the UI so user is not stuck.
+      setState(() {
+        _callInProgress = false;
+        _currentCallState = CallState.End;
+      });
+    }
+  }
+
+  void _log(String msg) {
+    setState(() => _debugMessage = msg);
+    print('[Softphone] $msg');
+  }
+
+  CallState _convertCallState(dynamic state) {
+    final s = state.toString().toLowerCase();
+    if (s.contains('autoresumed')) return CallState.StreamsRunning;
+    if (s.contains('paused')) return CallState.StreamsRunning;
+    if (s.contains('incoming')) return CallState.IncomingReceived;
+    if (s.contains('dialing') || s.contains('outgoinginit'))
+      return CallState.Dialing;
+    if (s.contains('ringing')) return CallState.Ringing;
+    if (s.contains('connected')) return CallState.Connected;
+    if (s.contains('streams')) return CallState.StreamsRunning;
+    if (s.contains('end') || s.contains('released')) return CallState.End;
+    if (s.contains('error')) return CallState.Error;
+    return CallState.Idle;
+  }
+
+  // ---------- Contacts methods ----------
+  void _filterContacts() {
+    final query = _searchController.text.trim().toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredContacts = List.from(_contacts);
+      } else {
+        _filteredContacts = _contacts.where((contact) {
+          final name = (contact.displayName ?? '').toLowerCase();
+          final phones = contact.phones
+              .map((p) => p.number)
+              .join(' ')
+              .toLowerCase();
+          return name.contains(query) || phones.contains(query);
+        }).toList();
+      }
+    });
+  }
+
+  // Future<List<fc.Contact>> _autoLoadContacts() async {
+  //   final status = await ph.Permission.contacts.status;
+  //   if (!status.isGranted) {
+  //     final granted = await ph.Permission.contacts.request();
+  //     if (!granted.isGranted) {
+  //       throw Exception('Contacts permission denied');
+  //     }
+  //   }
+  //   final contacts = await fc.fc.FlutterContacts.getContacts(withProperties: true);
+  //   return contacts;
+  // }
+  Future<List<fc.Contact>> _autoLoadContacts() async {
+    try {
+      final status = await ph.Permission.contacts.status;
+
+      if (!status.isGranted) {
+        final granted = await ph.Permission.contacts.request();
+
+        if (!granted.isGranted) {
+          return [];
+        }
+      }
+
+      final contacts = await fc.FlutterContacts.getAll(
+        properties: {fc.ContactProperty.name, fc.ContactProperty.phone},
+      );
+
+      return contacts;
+    } catch (e) {
+      debugPrint('[Contacts Error] $e');
+      return [];
+    }
+  }
+
+  //ERROR HANDLING FOR NETWORK ISSUES
+
+  String _friendlyErrorMessage(
+    dynamic error, {
+    String fallback = 'Something went wrong. Please try again.',
+  }) {
+    final raw = error?.toString() ?? '';
+    final lower = raw.toLowerCase();
+
+    // No internet / DNS / phone offline
+    if (lower.contains('socketexception') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('no address associated with hostname') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('clientexception') ||
+        lower.contains('connection failed')) {
+      return 'No internet connection. Please connect to mobile data or WiFi and try again.';
+    }
+
+    // Slow or unstable internet
+    if (lower.contains('timed out') || lower.contains('timeout')) {
+      return 'The request took too long. Please check your connection and try again.';
+    }
+
+    // Server unreachable
+    if (lower.contains('connection refused') ||
+        lower.contains('connection reset')) {
+      return 'Unable to reach Number 6 service right now. Please try again shortly.';
+    }
+
+    // Auth/session issue
+    if (lower.contains('401') || lower.contains('unauthorized')) {
+      return 'Your session has expired. Please log in again.';
+    }
+
+    if (lower.contains('403') || lower.contains('forbidden')) {
+      return 'You are not allowed to perform this action.';
+    }
+
+    // Server error
+    if (lower.contains('500') ||
+        lower.contains('502') ||
+        lower.contains('503') ||
+        lower.contains('504')) {
+      return 'Number 6 service is temporarily unavailable. Please try again shortly.';
+    }
+
+    // Hide anything technical
+    if (lower.contains('http://') ||
+        lower.contains('https://') ||
+        lower.contains('/api/') ||
+        lower.contains('exception') ||
+        lower.contains('traceback') ||
+        lower.contains('errno')) {
+      return fallback;
+    }
+
+    return fallback;
+  }
+
+  String _safeApiMessage(dynamic message, {required String fallback}) {
+    if (message == null) return fallback;
+
+    final text = message.toString().trim();
+    if (text.isEmpty) return fallback;
+
+    final lower = text.toLowerCase();
+
+    // Never show API URLs, endpoints, exceptions, or system errors to users.
+    if (lower.contains('http://') ||
+        lower.contains('https://') ||
+        lower.contains('/api/') ||
+        lower.contains('socketexception') ||
+        lower.contains('clientexception') ||
+        lower.contains('exception') ||
+        lower.contains('traceback') ||
+        lower.contains('errno') ||
+        lower.contains('failed host lookup')) {
+      return _friendlyErrorMessage(text, fallback: fallback);
+    }
+
+    return text;
+  }
+
+  // Future<void> _loadWalletData() async {
+  //   if (!mounted) return;
+
+  //   setState(() {
+  //     _walletLoading = true;
+  //     _walletError = null;
+  //   });
+
+  //   try {
+  //     final balanceResult = await AuthService.getBalance();
+  //     final topupsResult = await AuthService.getTopups();
+
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       if (balanceResult['success'] == true) {
+  //         _walletBalance = Map<String, dynamic>.from(balanceResult['balance']);
+  //       } else {
+  //         _walletError = balanceResult['message'] ?? 'Could not load balance';
+  //       }
+
+  //       if (topupsResult['success'] == true) {
+  //         _topups = List<dynamic>.from(topupsResult['topups']);
+  //       }
+
+  //       _walletLoading = false;
+  //     });
+  //   } catch (e) {
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       _walletLoading = false;
+  //       _walletError = e.toString();
+  //     });
+  //   }
+  // }
+
+  Future<void> _loadWalletData() async {
+    if (!mounted) return;
+
+    setState(() {
+      _walletLoading = true;
+      _walletError = null;
+    });
+
+    try {
+      final balanceResult = await AuthService.getBalance();
+      final topupsResult = await AuthService.getTopups();
+
+      if (!mounted) return;
+
+      setState(() {
+        if (balanceResult['success'] == true) {
+          _walletBalance = Map<String, dynamic>.from(balanceResult['balance']);
+        } else {
+          _walletError = _safeApiMessage(
+            balanceResult['message'],
+            fallback: 'Could not load wallet balance. Please try again.',
+          );
+        }
+
+        if (topupsResult['success'] == true) {
+          _topups = List<dynamic>.from(topupsResult['topups']);
+        }
+
+        _walletLoading = false;
+      });
+    } catch (e) {
+      // Keep technical error in console only, not on screen.
+      debugPrint('[Wallet Error] $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _walletLoading = false;
+        _walletError = _friendlyErrorMessage(
+          e,
+          fallback: 'Could not load wallet balance. Please try again.',
+        );
+      });
+    }
+  }
+
+  // Future<void> _loadServerCdrs() async {
+  //   if (!mounted) return;
+
+  //   setState(() {
+  //     _historyLoading = true;
+  //     _historyError = null;
+  //   });
+
+  //   try {
+  //     final result = await AuthService.getCdrs();
+
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       if (result['success'] == true) {
+  //         _serverCdrs = List<dynamic>.from(result['cdrs']);
+  //       } else {
+  //         _historyError = result['message'] ?? 'Could not load call history';
+  //       }
+
+  //       _historyLoading = false;
+  //     });
+  //   } catch (e) {
+  //     if (!mounted) return;
+
+  //     setState(() {
+  //       _historyLoading = false;
+  //       _historyError = e.toString();
+  //     });
+  //   }
+  // }
+
+  Future<void> _loadServerCdrs() async {
+    if (!mounted) return;
+
+    setState(() {
+      _historyLoading = true;
+      _historyError = null;
+    });
+
+    try {
+      final result = await AuthService.getCdrs();
+
+      if (!mounted) return;
+
+      setState(() {
+        if (result['success'] == true) {
+          _serverCdrs = List<dynamic>.from(result['cdrs']);
+        } else {
+          _historyError = _safeApiMessage(
+            result['message'],
+            fallback: 'Could not load call history. Please try again.',
+          );
+        }
+
+        _historyLoading = false;
+      });
+    } catch (e) {
+      // Keep technical error in console only, not on screen.
+      debugPrint('[CDR Error] $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _historyLoading = false;
+        _historyError = _friendlyErrorMessage(
+          e,
+          fallback: 'Could not load call history. Please try again.',
+        );
+      });
+    }
+  }
+
+  String _formatDurationFromSeconds(dynamic value) {
+    final seconds = int.tryParse(value?.toString() ?? '0') ?? 0;
+
+    if (seconds <= 0) return '0s';
+
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+
+    if (minutes == 0) return '${remainingSeconds}s';
+    if (remainingSeconds == 0) return '${minutes}m';
+
+    return '${minutes}m ${remainingSeconds}s';
+  }
+
+  String _formatServerDate(dynamic value) {
+    if (value == null) return '';
+
+    final parsed = DateTime.tryParse(value.toString());
+    if (parsed == null) return value.toString();
+
+    return _formatDateTime(parsed.toLocal());
+  }
+
+  String _moneyText(dynamic amount, dynamic currency) {
+    final a = amount?.toString() ?? '0';
+    final c = currency?.toString().toUpperCase() ?? 'USD';
+
+    return '$c $a';
+  }
+
+  //
+  Future<void> _loadReferralStatus() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingReferralStatus = true;
+      _referralMessage = '';
+    });
+
+    final result = await AuthService.getReferralStatus();
+
+    if (!mounted) return;
+
+    final referral = result['referral'];
+
+    setState(() {
+      _isLoadingReferralStatus = false;
+
+      if (result['success'] == true && referral is Map<String, dynamic>) {
+        _referralStatus = referral;
+        _referralMessage = '';
+      } else {
+        _referralMessage =
+            result['message']?.toString() ?? 'Could not load referral status';
+      }
+    });
+  }
+
+  Future<void> _applyReferralCodeFromTopUp() async {
+    final code = _referralCodeController.text.trim().toUpperCase();
+
+    if (code.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter referral code')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isApplyingReferralCode = true;
+      _referralMessage = '';
+    });
+
+    final result = await AuthService.applyReferralCode(code);
+
+    if (!mounted) return;
+
+    final referral = result['referral'];
+
+    setState(() {
+      _isApplyingReferralCode = false;
+
+      if (result['success'] == true && referral is Map<String, dynamic>) {
+        _referralStatus = referral;
+        _referralCodeController.clear();
+      }
+
+      _referralMessage =
+          result['message']?.toString() ?? 'Referral request completed';
+    });
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_referralMessage)));
+  }
+
+  Widget _buildReferralCodeBox() {
+    final referral = _referralStatus ?? {};
+    final hasReferral = referral['has_referral'] == true;
+    final agentName = referral['agent_name']?.toString() ?? '';
+    final referralCode = referral['referral_code']?.toString() ?? '';
+    final used = referral['discount_purchases_used']?.toString() ?? '0';
+    final remaining =
+        referral['discount_purchases_remaining']?.toString() ?? '0';
+    final qualifies = referral['qualifies_for_discount'] == true;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: _isLoadingReferralStatus
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Referral Discount',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  if (hasReferral) ...[
+                    Text('Referral code applied: $referralCode'),
+                    if (agentName.isNotEmpty)
+                      Text('Marketing agent: $agentName'),
+                    const SizedBox(height: 8),
+                    Text('Discount purchases used: $used of 5'),
+                    Text('Discount purchases remaining: $remaining'),
+                    const SizedBox(height: 8),
+                    Text(
+                      qualifies
+                          ? 'You qualify for 20% bonus airtime on your next top-up.'
+                          : 'Your first 5 referral discount purchases have been used.',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: _loadReferralStatus,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Refresh Referral Status'),
+                    ),
+                  ] else ...[
+                    const Text(
+                      'Have a referral code? Enter it below to receive 20% bonus airtime on your first 5 purchases.',
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _referralCodeController,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Referral Code',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _isApplyingReferralCode
+                            ? null
+                            : _applyReferralCodeFromTopUp,
+                        icon: _isApplyingReferralCode
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.verified),
+                        label: Text(
+                          _isApplyingReferralCode
+                              ? 'Applying...'
+                              : 'Apply Referral Code',
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_referralMessage.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(_referralMessage),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+
+  void _showTopUpDialog() {
+    //   final amountController = TextEditingController();
+
+    //   showDialog(
+    //     context: context,
+    //     builder: (dialogContext) {
+    //       return AlertDialog(
+    //         title: const Text('Top Up Wallet'),
+    //         content: TextField(
+    //           controller: amountController,
+    //           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    //           decoration: const InputDecoration(
+    //             labelText: 'Amount',
+    //             hintText: 'Example: 10',
+    //             border: OutlineInputBorder(),
+    //           ),
+    //         ),
+    //         actions: [
+    //           TextButton(
+    //             onPressed: () {
+    //               Navigator.pop(dialogContext);
+    //             },
+    //             child: const Text('Cancel'),
+    //           ),
+    //           ElevatedButton(
+    //             onPressed: () async {
+    //               final amount = amountController.text.trim();
+
+    //               if (amount.isEmpty) {
+    //                 ScaffoldMessenger.of(context).showSnackBar(
+    //                   const SnackBar(
+    //                     content: Text('Please enter an amount'),
+    //                     backgroundColor: Colors.red,
+    //                   ),
+    //                 );
+    //                 return;
+    //               }
+
+    //               Navigator.pop(dialogContext);
+
+    //               final result = await AuthService.createCheckoutSession(
+    //                 amount: amount,
+    //               );
+
+    //               if (result['success'] == true &&
+    //                   result['checkoutUrl'] != null) {
+    //                 final url = Uri.parse(result['checkoutUrl']);
+
+    //                 if (await canLaunchUrl(url)) {
+    //                   await launchUrl(url, mode: LaunchMode.externalApplication);
+    //                 }
+    //               }
+
+    //               if (!mounted) return;
+
+    //               ScaffoldMessenger.of(context).showSnackBar(
+    //                 SnackBar(
+    //                   // content: Text(result['message'] ?? 'Top-up request sent'),
+    //                   content: Text(
+    //                     _safeApiMessage(
+    //                       result['message'],
+    //                       fallback:
+    //                           'Top-up request could not be completed. Please try again.',
+    //                     ),
+    //                   ),
+    //                   backgroundColor: result['success'] == true
+    //                       ? Colors.green
+    //                       : Colors.orange,
+    //                 ),
+    //               );
+
+    //               await _loadWalletData();
+    //             },
+    //             child: const Text('Continue'),
+    //           ),
+    //         ],
+    //       );
+    //     },
+    //   );
+    // }
+
+    void _showTopUpDialog() {
+      showDialog(
+        context: context,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Top Up Wallet'),
+            content: FutureBuilder<Map<String, dynamic>>(
+              future: AuthService.getTopupInstructions(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const SizedBox(
+                    height: 140,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+
+                if (snapshot.hasError) {
+                  return const Text(
+                    'Could not load top-up instructions. Please check your internet connection and try again.',
+                  );
+                }
+
+                final data = snapshot.data ?? {};
+                final success = data['success'] == true;
+
+                if (!success) {
+                  return Text(
+                    _safeApiMessage(
+                      data['message'],
+                      fallback:
+                          'Could not load top-up instructions. Please try again.',
+                    ),
+                  );
+                }
+
+                final momoNumber =
+                    data['momo_number']?.toString() ?? '+233597565111';
+                final momoName = data['momo_name']?.toString() ?? 'Mugis Issah';
+                final whatsappNumber =
+                    data['whatsapp_number']?.toString() ?? '+233593338490';
+                final usdRate = data['usd_rate']?.toString() ?? '';
+
+                return SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '1. Please send mobile money to $momoNumber ($momoName).',
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '2. Send payment confirmation details via WhatsApp to $whatsappNumber for immediate top up.',
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        usdRate.isNotEmpty
+                            ? '3. Our USD rate for today is GHS $usdRate = 1 USD.'
+                            : '3. Please contact us on WhatsApp for today’s USD rate.',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Call rates are 19 cents per minute for all networks and airtime DOES NOT EXPIRE.',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('10 USD gives 53 minutes of talk time.'),
+                      const Text('15 USD gives 79 minutes of talk time.'),
+                      const Text('20 USD gives 105 minutes of talk time.'),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'You can purchase any amount from 10 USD upwards.',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('Thank you.'),
+                    ],
+                  ),
+                );
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text('Close'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final message = Uri.encodeComponent(
+                    'Hello Number Six, I have made a MoMo payment for wallet top-up. Please assist with immediate top up.',
+                  );
+
+                  final url = Uri.parse(
+                    'https://wa.me/233593338490?text=$message',
+                  );
+
+                  if (await canLaunchUrl(url)) {
+                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                  }
+                },
+                icon: const Icon(Icons.chat),
+                label: const Text('Open WhatsApp'),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
+    Widget _buildWallet() {
+      final amount = _walletBalance?['amount']?.toString() ?? '0';
+      final currency =
+          _walletBalance?['currency']?.toString().toUpperCase() ?? 'USD';
+
+      return RefreshIndicator(
+        onRefresh: _loadWalletData,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.blue[700],
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Current Balance',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$currency $amount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _showTopUpDialog,
+                      icon: const Icon(Icons.add_card),
+                      label: const Text('Top Up'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.blue,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 14),
+            _buildReferralCodeBox(),
+            const SizedBox(height: 20),
+
+            if (_walletLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(20),
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+
+            if (_walletError != null)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red[50],
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red),
+                ),
+                child: Text(
+                  _walletError!,
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Top-up History',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  onPressed: _loadWalletData,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+
+            if (_topups.isEmpty && !_walletLoading)
+              Container(
+                padding: const EdgeInsets.all(20),
+                alignment: Alignment.center,
+                child: Text(
+                  'No top-ups yet',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              )
+            else
+              ..._topups.map((item) {
+                final topup = Map<String, dynamic>.from(item);
+                final topupAmount = topup['amount'];
+                final topupCurrency = topup['currency'];
+                final status = topup['status']?.toString() ?? '';
+                final provider = topup['provider']?.toString() ?? '';
+                final createdAt = _formatServerDate(topup['created_at']);
+
+                // return Card(
+                //   child: ListTile(
+                //     leading: CircleAvatar(
+                //       backgroundColor: status == 'success'
+                //           ? Colors.green[100]
+                //           : Colors.orange[100],
+                //       child: Icon(
+                //         status == 'success' ? Icons.check : Icons.pending,
+                //         color: status == 'success' ? Colors.green : Colors.orange,
+                //       ),
+                //     ),
+                //     title: Text(
+                //       _moneyText(topupAmount, topupCurrency),
+                //       style: const TextStyle(fontWeight: FontWeight.bold),
+                //     ),
+                //     subtitle: Text('$provider • $status • $createdAt'),
+                //   ),
+                // );
+                return Card(
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: status == 'success'
+                          ? Colors.green[100]
+                          : Colors.orange[100],
+                      child: Icon(
+                        status == 'success' ? Icons.check : Icons.pending,
+                        color: status == 'success'
+                            ? Colors.green
+                            : Colors.orange,
+                      ),
+                    ),
+                    title: Text(
+                      _moneyText(topupAmount, topupCurrency),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text('$provider • $status • $createdAt'),
+                    trailing: status == 'pending'
+                        ? TextButton(
+                            onPressed: () async {
+                              final reference =
+                                  topup['reference']?.toString() ?? '';
+
+                              if (reference.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Missing payment reference'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                                return;
+                              }
+
+                              final result =
+                                  await AuthService.verifyPaystackTopup(
+                                    reference: reference,
+                                  );
+
+                              if (!mounted) return;
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  // content: Text(
+                                  //   result['message'] ?? 'Verification checked',
+                                  // ),
+                                  content: Text(
+                                    _safeApiMessage(
+                                      result['message'],
+                                      fallback:
+                                          'Payment verification could not be completed. Please try again.',
+                                    ),
+                                  ),
+                                  backgroundColor: result['success'] == true
+                                      ? Colors.green
+                                      : Colors.orange,
+                                ),
+                              );
+
+                              await _loadWalletData();
+                            },
+                            child: const Text('Verify'),
+                          )
+                        : null,
+                  ),
+                );
+              }).toList(),
+          ],
+        ),
+      );
+    }
+
+    Widget _buildServerHistory() {
+      return RefreshIndicator(
+        onRefresh: _loadServerCdrs,
+        child: _historyLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _historyError != null
+            ? ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red[50],
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.red),
+                    ),
+                    child: Text(
+                      _historyError!,
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _loadServerCdrs,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              )
+            : _serverCdrs.isEmpty
+            ? ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  const SizedBox(height: 120),
+                  Icon(Icons.history, size: 64, color: Colors.grey[300]),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      'No server call history yet',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: ElevatedButton.icon(
+                      onPressed: _loadServerCdrs,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Refresh'),
+                    ),
+                  ),
+                ],
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(8),
+                itemCount: _serverCdrs.length,
+                itemBuilder: (context, index) {
+                  final call = Map<String, dynamic>.from(_serverCdrs[index]);
+
+                  final number =
+                      call['dialed_number']?.toString().isNotEmpty == true
+                      ? call['dialed_number'].toString()
+                      : call['callee']?.toString() ?? 'Unknown';
+
+                  final duration = _formatDurationFromSeconds(
+                    call['connected_seconds'],
+                  );
+
+                  final answeredTime = _formatServerDate(call['answered_time']);
+
+                  final cost =
+                      call['cost'] ?? call['charged_amount'] ?? call['amount'];
+
+                  return Card(
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.green[100],
+                        child: const Icon(Icons.call_made, color: Colors.green),
+                      ),
+                      title: Text(
+                        number,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        cost != null
+                            ? '$answeredTime • $duration • Cost: $cost'
+                            : '$answeredTime • $duration',
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.call, color: Colors.green),
+                        onPressed: () {
+                          _dialNumberController.text = number;
+                          setState(() => _selectedIndex = 0);
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+      );
+    }
+
+    // ---------- UI Components ----------
+    Widget _buildDialer() {
+      final bool isCallActive =
+          _callInProgress ||
+          (_currentCallState != null &&
+              _currentCallState != CallState.Idle &&
+              _currentCallState != CallState.End &&
+              _currentCallState != CallState.Error);
+
+      final bool hasText = _dialNumberController.text.trim().isNotEmpty;
+
+      return SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final double height = constraints.maxHeight;
+            final bool tinyScreen = height < 560;
+            final bool smallScreen = height < 660;
+
+            final double keypadButtonSize = tinyScreen
+                ? 58
+                : (smallScreen ? 68 : 82);
+            final double keypadSpacing = tinyScreen
+                ? 6
+                : (smallScreen ? 9 : 14);
+            final double displayFontSize = tinyScreen
+                ? 28
+                : (smallScreen ? 34 : 40);
+            final double pagePadding = tinyScreen ? 8 : 12;
+            final double actionButtonSize = tinyScreen ? 48 : 56;
+
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    pagePadding,
+                    pagePadding,
+                    pagePadding,
+                    pagePadding + 8,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildNumberDisplayCard(
+                            displayFontSize: displayFontSize,
+                            compact: tinyScreen,
+                          ),
+
+                          SizedBox(height: keypadSpacing + 4),
+
+                          _buildKeypadResponsive(
+                            buttonSize: keypadButtonSize,
+                            spacing: keypadSpacing,
+                          ),
+                        ],
+                      ),
+
+                      SizedBox(height: keypadSpacing + 6),
+
+                      _buildDialerActions(
+                        isCallActive: isCallActive,
+                        hasText: hasText,
+                        buttonSize: actionButtonSize,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    Widget _buildNumberDisplayCard({
+      required double displayFontSize,
+      required bool compact,
+    }) {
+      final bool showStatus =
+          _currentCallState != null &&
+          _currentCallState != CallState.Idle &&
+          _currentCallState != CallState.End;
+
+      return Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 16,
+          vertical: compact ? 10 : 16,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.grey.shade300),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _dialNumberController,
+              textAlign: TextAlign.center,
+              keyboardType: TextInputType.phone,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: displayFontSize,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.0,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Enter number',
+                hintStyle: TextStyle(
+                  color: Colors.grey.shade400,
+                  fontSize: compact ? 24 : 30,
+                  fontWeight: FontWeight.w500,
+                ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+
+            if (showStatus) ...[
+              SizedBox(height: compact ? 8 : 12),
+              Chip(
+                label: Text(_currentCallState.toString().split('.').last),
+                backgroundColor: _getCallStateColor(),
+                labelStyle: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+
+            if (_debugMessage.isNotEmpty) ...[
+              SizedBox(height: compact ? 4 : 8),
+              Text(
+                _debugMessage,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: compact ? 11 : 12,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
+    Widget _buildKeypadResponsive({
+      required double buttonSize,
+      required double spacing,
+    }) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _keypadRow([
+            _buildDialButtonResponsive('1', '', buttonSize),
+            _buildDialButtonResponsive('2', 'ABC', buttonSize),
+            _buildDialButtonResponsive('3', 'DEF', buttonSize),
+          ]),
+          SizedBox(height: spacing),
+          _keypadRow([
+            _buildDialButtonResponsive('4', 'GHI', buttonSize),
+            _buildDialButtonResponsive('5', 'JKL', buttonSize),
+            _buildDialButtonResponsive('6', 'MNO', buttonSize),
+          ]),
+          SizedBox(height: spacing),
+          _keypadRow([
+            _buildDialButtonResponsive('7', 'PQRS', buttonSize),
+            _buildDialButtonResponsive('8', 'TUV', buttonSize),
+            _buildDialButtonResponsive('9', 'WXYZ', buttonSize),
+          ]),
+          SizedBox(height: spacing),
+          _keypadRow([
+            _buildDialButtonResponsive('*', '', buttonSize),
+            _buildDialButtonResponsive('0', '+', buttonSize),
+            _buildDialButtonResponsive('#', '', buttonSize),
+          ]),
+        ],
+      );
+    }
+
+    Widget _keypadRow(List<Widget> children) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: children,
+      );
+    }
+
+    Widget _buildDialButtonResponsive(
+      String number,
+      String letters,
+      double size,
+    ) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(size / 2),
+            onTap: () {
+              final oldText = _dialNumberController.text;
+              final selection = _dialNumberController.selection;
+              final cursorPosition = selection.baseOffset;
+
+              if (cursorPosition >= 0 && cursorPosition <= oldText.length) {
+                final newText = oldText.replaceRange(
+                  cursorPosition,
+                  cursorPosition,
+                  number,
+                );
+                _dialNumberController.value = TextEditingValue(
+                  text: newText,
+                  selection: TextSelection.collapsed(
+                    offset: cursorPosition + number.length,
+                  ),
+                );
+              } else {
+                _dialNumberController.text = oldText + number;
+                _dialNumberController.selection = TextSelection.collapsed(
+                  offset: _dialNumberController.text.length,
+                );
+              }
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white,
+                border: Border.all(color: Colors.grey.shade300, width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 5,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    number,
+                    style: TextStyle(
+                      fontSize: size < 65 ? 26 : (size < 75 ? 32 : 38),
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (letters.isNotEmpty)
+                    Text(
+                      letters,
+                      style: TextStyle(
+                        fontSize: size < 65 ? 8 : 10,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget _buildDialerActions({
+      required bool isCallActive,
+      required bool hasText,
+      required double buttonSize,
+    }) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _dialerRoundAction(
+            icon: Icons.volume_up,
+            color: Colors.blue,
+            size: buttonSize,
+            onPressed: () {
+              _linphonePlugin.toggleSpeaker();
+              _log('Speaker toggled');
+            },
+          ),
+
+          _dialerRoundAction(
+            icon: isCallActive ? Icons.call_end : Icons.call,
+            color: isCallActive ? Colors.red : Colors.green,
+            size: buttonSize + 10,
+            onPressed: isCallActive
+                ? _hangUp
+                : hasText
+                ? _makeCall
+                : null,
+          ),
+
+          _dialerRoundAction(
+            icon: Icons.backspace,
+            color: Colors.grey,
+            size: buttonSize,
+            onPressed: hasText
+                ? () {
+                    final text = _dialNumberController.text;
+                    final selection = _dialNumberController.selection;
+                    final cursorPosition = selection.baseOffset;
+
+                    if (cursorPosition > 0 && cursorPosition <= text.length) {
+                      final newText = text.replaceRange(
+                        cursorPosition - 1,
+                        cursorPosition,
+                        '',
+                      );
+                      _dialNumberController.value = TextEditingValue(
+                        text: newText,
+                        selection: TextSelection.collapsed(
+                          offset: cursorPosition - 1,
+                        ),
+                      );
+                    } else if (text.isNotEmpty) {
+                      _dialNumberController.text = text.substring(
+                        0,
+                        text.length - 1,
+                      );
+                      _dialNumberController.selection = TextSelection.collapsed(
+                        offset: _dialNumberController.text.length,
+                      );
+                    }
+                  }
+                : null,
+          ),
+        ],
+      );
+    }
+
+    Widget _dialerRoundAction({
+      required IconData icon,
+      required Color color,
+      required double size,
+      required VoidCallback? onPressed,
+    }) {
+      final bool enabled = onPressed != null;
+
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Material(
+          color: enabled ? color : Colors.grey.shade300,
+          shape: const CircleBorder(),
+          elevation: enabled ? 4 : 0,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onPressed,
+            child: Icon(
+              icon,
+              color: enabled ? Colors.white : Colors.grey.shade600,
+              size: size * 0.48,
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget _circularDialButton(String digit, String letters) {
+      return SizedBox(
+        width: 80,
+        height: 80,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _dialNumberController.text += digit,
+            customBorder: const CircleBorder(),
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.grey[300]!, width: 2),
+                color: Colors.white,
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    digit,
+                    style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (letters.isNotEmpty)
+                    Text(
+                      letters,
+                      style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Color _getCallStateColor() {
+      switch (_currentCallState) {
+        case CallState.Dialing:
+        case CallState.Ringing:
+          return Colors.orange;
+        case CallState.Connected:
+        case CallState.StreamsRunning:
+          return Colors.green;
+        case CallState.IncomingReceived:
+          return Colors.blue;
+        default:
+          return Colors.grey;
+      }
+    }
+
+    // ---------- Contacts Tab ----------
+    // Widget _buildContacts() {
+    //   if (_contactsFuture == null) {
+    //     return const Center(child: Text('Error loading contacts'));
+    //   }
+    //   return FutureBuilder<List<fc.Contact>>(
+    //     future: _contactsFuture!,
+    //     builder: (context, snapshot) {
+    //       if (snapshot.connectionState == ConnectionState.waiting) {
+    //         return const Center(child: CircularProgressIndicator());
+    //       }
+    //       if (snapshot.hasError) {
+    //         return Center(
+    //           child: Column(
+    //             mainAxisAlignment: MainAxisAlignment.center,
+    //             children: [
+    //               const Icon(Icons.error, size: 48, color: Colors.red),
+    //               const SizedBox(height: 16),
+    //               Text('Error: ${snapshot.error}', textAlign: TextAlign.center),
+    //               const SizedBox(height: 16),
+    //               ElevatedButton(
+    //                 onPressed: () {
+    //                   setState(() {
+    //                     _contactsFuture = _autoLoadContacts();
+    //                   });
+    //                 },
+    //                 child: const Text('Retry'),
+    //               ),
+    //             ],
+    //           ),
+    //         );
+    //       }
+    //       final contacts = snapshot.data ?? [];
+    //       if (_contacts != contacts) {
+    //         WidgetsBinding.instance.addPostFrameCallback((_) {
+    //           setState(() {
+    //             _contacts = contacts;
+    //             _filteredContacts = contacts;
+    //           });
+    //         });
+    //       }
+    //       return _buildContactListWithSearch();
+    //     },
+    //   );
+    // }
+
+    Widget _buildContacts() {
+      if (_contactsFuture == null) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.contacts, size: 64, color: Colors.grey[300]),
+                const SizedBox(height: 16),
+                const Text(
+                  'Contacts are not loaded yet',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Tap the button below to load your phone contacts.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _contactsFuture = _autoLoadContacts();
+                    });
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Load Contacts'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      return FutureBuilder<List<fc.Contact>>(
+        future: _contactsFuture!,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error, size: 48, color: Colors.red),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Could not load contacts',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      snapshot.error.toString(),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _contactsFuture = _autoLoadContacts();
+                        });
+                      },
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          final contacts = snapshot.data ?? [];
+
+          if (_contacts != contacts) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              setState(() {
+                _contacts = contacts;
+                _filteredContacts = contacts;
+              });
+            });
+          }
+
+          return _buildContactListWithSearch();
+        },
+      );
+    }
+
+    Widget _buildContactListWithSearch() {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search by name or number',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          _filterContacts();
+                        },
+                      )
+                    : null,
+              ),
+            ),
+          ),
+          Expanded(
+            child: _contacts.isEmpty
+                ? const Center(child: Text('No contacts found'))
+                : (_filteredContacts.isEmpty &&
+                      _searchController.text.isNotEmpty)
+                ? Center(
+                    child: Text(
+                      'No contacts match "${_searchController.text}"',
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _filteredContacts.length,
+                    itemBuilder: (context, index) {
+                      final contact = _filteredContacts[index];
+                      final hasNumber = contact.phones.isNotEmpty;
+                      final phoneNumber = hasNumber
+                          ? contact.phones.first.number
+                          : '';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          child: Text(
+                            (contact.displayName ?? '').isNotEmpty
+                                ? (contact.displayName ?? '')[0].toUpperCase()
+                                : '?',
+                          ),
+                        ),
+                        title: Text(contact.displayName ?? 'Unknown'),
+                        subtitle: hasNumber
+                            ? Text(phoneNumber)
+                            : const Text('No number'),
+                        trailing: hasNumber
+                            ? IconButton(
+                                icon: const Icon(
+                                  Icons.call,
+                                  color: Colors.green,
+                                ),
+                                onPressed: () {
+                                  _dialNumberController.text = phoneNumber;
+                                  setState(() => _selectedIndex = 0);
+                                },
+                              )
+                            : null,
+                        onTap: hasNumber
+                            ? () {
+                                _dialNumberController.text = phoneNumber;
+                                setState(() => _selectedIndex = 0);
+                              }
+                            : null,
+                      );
+                    },
+                  ),
+          ),
+        ],
+      );
+    }
+
+    // ---------- Call Log Tab ----------
+    Widget _buildCallLog() {
+      if (_callLogs.isEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.phone_missed, size: 64, color: Colors.grey[300]),
+              const SizedBox(height: 16),
+              Text(
+                'No call logs yet',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        );
+      }
+      return ListView.builder(
+        itemCount: _callLogs.length,
+        itemBuilder: (context, index) {
+          final log = _callLogs[index];
+          final durationStr = log.getDurationString();
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: Colors.grey[50],
+              border: Border.all(color: Colors.grey[200]!),
+            ),
+            child: ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _getCallLogIconColor(log.status).withOpacity(0.2),
+                ),
+                child: Icon(
+                  _getCallLogIcon(log.status),
+                  color: _getCallLogIconColor(log.status),
+                ),
+              ),
+              title: Text(
+                log.number,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '${log.status} • ${_formatDateTime(log.date)}${durationStr.isNotEmpty ? ' • $durationStr' : ''}',
+                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.call, color: Colors.green),
+                onPressed: () {
+                  _dialNumberController.text = log.number;
+                  setState(() => _selectedIndex = 0);
+                },
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    IconData _getCallLogIcon(String status) {
+      switch (status) {
+        case 'Outgoing':
+          return Icons.call_made;
+        case 'Incoming':
+          return Icons.call_received;
+        case 'Missed':
+          return Icons.call_missed;
+        default:
+          return Icons.call;
+      }
+    }
+
+    Color _getCallLogIconColor(String status) {
+      switch (status) {
+        case 'Outgoing':
+          return Colors.green;
+        case 'Incoming':
+          return Colors.blue;
+        case 'Missed':
+          return Colors.red;
+        default:
+          return Colors.grey;
+      }
+    }
+
+    String _formatDateTime(DateTime dt) {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final yesterday = today.subtract(const Duration(days: 1));
+      final dtDate = DateTime(dt.year, dt.month, dt.day);
+      if (dtDate == today)
+        return 'Today ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      if (dtDate == yesterday)
+        return 'Yesterday ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    }
+
+    Widget _buildSettings() {
+      String registrationText;
+
+      switch (_registrationState) {
+        case RegistrationState.Ok:
+          registrationText = 'Registered';
+          break;
+        case RegistrationState.Progress:
+          registrationText = 'Registering...';
+          break;
+        case RegistrationState.Failed:
+          registrationText = 'Registration Failed';
+          break;
+        case RegistrationState.None:
+          registrationText = 'Not Registered';
+          break;
+      }
+
+      Color statusColor;
+
+      switch (_registrationState) {
+        case RegistrationState.Ok:
+          statusColor = Colors.green;
+          break;
+        case RegistrationState.Progress:
+          statusColor = Colors.orange;
+          break;
+        case RegistrationState.Failed:
+          statusColor = Colors.red;
+          break;
+        case RegistrationState.None:
+          statusColor = Colors.grey;
+          break;
+      }
+
+      final sipUsername = _sipUsernameController.text.trim().isEmpty
+          ? 'Not available'
+          : _sipUsernameController.text.trim();
+
+      return SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Account Settings',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+
+              const SizedBox(height: 20),
+
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[50],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey[300]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SIP Account',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        const Icon(Icons.person, color: Colors.blue),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'SIP Username: $sipUsername',
+                            style: const TextStyle(fontSize: 15),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        Icon(Icons.circle, color: statusColor, size: 14),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Registration Status: $registrationText',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: statusColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        const Icon(Icons.security, color: Colors.blueGrey),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Current Transport: ${_sipTransport.toUpperCase()} $_sipProxyPort',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        const Icon(Icons.info_outline, color: Colors.grey),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _debugMessage.isEmpty
+                                ? 'No system message'
+                                : _debugMessage,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              if (_registrationState == RegistrationState.Progress)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: CircularProgressIndicator(),
+                  ),
+                ),
+
+              if (_registrationState == RegistrationState.Failed) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _loadSavedSipDetails,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry SIP Registration'),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              const Text(
+                'SIP Transport',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+
+              const SizedBox(height: 8),
+
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.grey[50],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey[300]!),
+                ),
+                child: Column(
+                  children: [
+                    RadioListTile<SipTransportOption>(
+                      title: const Text('TLS 5061'),
+                      subtitle: const Text('Recommended / default'),
+                      value: SipTransportOption.tls5061,
+                      groupValue: _selectedSipTransport,
+                      onChanged: (value) {
+                        if (value != null) {
+                          _applySipTransport(value);
+                        }
+                      },
+                    ),
+
+                    RadioListTile<SipTransportOption>(
+                      title: const Text('TCP 5080'),
+                      subtitle: const Text(
+                        'Fallback for networks blocking normal SIP',
+                      ),
+                      value: SipTransportOption.tcp5080,
+                      groupValue: _selectedSipTransport,
+                      onChanged: (value) {
+                        if (value != null) {
+                          _applySipTransport(value);
+                        }
+                      },
+                    ),
+
+                    RadioListTile<SipTransportOption>(
+                      title: const Text('UDP 5060'),
+                      subtitle: const Text('Compatibility mode'),
+                      value: SipTransportOption.udp5060,
+                      groupValue: _selectedSipTransport,
+                      onChanged: (value) {
+                        if (value != null) {
+                          _applySipTransport(value);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    setState(() {
+                      _isRegistered = false;
+                      _registrationState = RegistrationState.Progress;
+                      _debugMessage =
+                          'Re-registering with ${_sipTransport.toUpperCase()} on port $_sipProxyPort...';
+                    });
+
+                    await _login();
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Re-register SIP'),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              Text(
+                'Current: ${_sipTransport.toUpperCase()} $_sipProxyPort',
+                style: TextStyle(color: Colors.grey[700], fontSize: 13),
+              ),
+
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+
+              const Text(
+                'App Account',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+
+              const SizedBox(height: 12),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    try {
+                      if (_callInProgress) {
+                        await _hangUp();
+                      }
+
+                      await _logout();
+
+                      final auth = AuthService();
+                      await auth.clearToken();
+
+                      if (mounted) {
+                        Navigator.pushReplacementNamed(context, '/login');
+                      }
+                    } catch (e) {
+                      _log('App logout error: $e');
+                    }
+                  },
+                  icon: const Icon(Icons.logout, color: Colors.white),
+                  label: const Text(
+                    'Logout',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              Text(
+                'Your SIP server credentials are managed automatically.',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    @override
+    Widget build(BuildContext context) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text(''),
+          elevation: 0,
+          actions: [
+            if (_isRegistered)
+              Container(
+                margin: const EdgeInsets.all(8),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.green[100],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Center(
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Colors.green,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'Online',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        body: IndexedStack(
+          index: _selectedIndex,
+          children: [
+            _buildDialer(),
+            _buildContacts(),
+            _buildWallet(),
+            _buildServerHistory(),
+            _buildSettings(),
+          ],
+        ),
+        // body: IndexedStack(
+        //   index: _selectedIndex,
+        //   children: [
+        //     _buildDialer(),
+        //     _buildContacts(),
+        //     _buildCallLog(),
+        //     _buildSettings(),
+        //   ],
+        // ),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          onTap: (index) => setState(() => _selectedIndex = index),
+          type: BottomNavigationBarType.fixed,
+          // items: const [
+          //   BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
+          //   BottomNavigationBarItem(
+          //     icon: Icon(Icons.contacts),
+          //     label: 'Contacts',
+          //   ),
+          //   BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Call Log'),
+          //   BottomNavigationBarItem(
+          //     icon: Icon(Icons.settings),
+          //     label: 'Settings',
+          //   ),
+          // ],
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.contacts),
+              label: 'Contacts',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.account_balance_wallet),
+              label: 'Wallet',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.history),
+              label: 'History',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.settings),
+              label: 'Settings',
+            ),
+          ],
+        ),
+      );
+    }
+
+    @override
+    void dispose() {
+      _sipUsernameController.dispose();
+      _sipPasswordController.dispose();
+      _sipDomainController.dispose();
+      _dialNumberController.dispose();
+      _searchController.dispose();
+      _referralCodeController.dispose();
+      super.dispose();
+    }
+  }
+}

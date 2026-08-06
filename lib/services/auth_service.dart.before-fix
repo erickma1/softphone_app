@@ -2,7 +2,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_model.dart';
-import 'package:flutter/foundation.dart';
 
 class AuthService {
   // Android emulator uses 10.0.2.2 to reach your computer localhost.
@@ -66,103 +65,12 @@ class AuthService {
     return {'Content-Type': 'application/json'};
   }
 
-  static bool _isJwtExpiredOrNearExpiry(String token) {
-    try {
-      final parts = token.split('.');
-
-      if (parts.length != 3) {
-        return false;
-      }
-
-      final payload = utf8.decode(
-        base64Url.decode(base64Url.normalize(parts[1])),
-      );
-
-      final data = jsonDecode(payload);
-      final expValue = data['exp'];
-
-      if (expValue == null) {
-        return false;
-      }
-
-      final expSeconds = expValue is int
-          ? expValue
-          : int.tryParse(expValue.toString()) ?? 0;
-
-      if (expSeconds <= 0) {
-        return false;
-      }
-
-      final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-
-      // Refresh 2 minutes before expiry.
-      return nowSeconds >= (expSeconds - 120);
-    } catch (e) {
-      debugPrint('[JWT Expiry Check Error] $e');
-      return false;
-    }
-  }
-
-  static Future<bool> refreshAccessToken() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final refreshToken = prefs.getString(_refreshTokenKey) ?? '';
-
-      if (refreshToken.isEmpty) {
-        return false;
-      }
-
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/auth/refresh/'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'refreshToken': refreshToken,
-              'refresh_token': refreshToken,
-              'refresh': refreshToken,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200 && data is Map<String, dynamic>) {
-        final newToken =
-            data['token']?.toString() ?? data['access']?.toString() ?? '';
-
-        if (newToken.isNotEmpty) {
-          await prefs.setString(_tokenKey, newToken);
-          debugPrint('[Token Refresh] Access token refreshed successfully');
-          return true;
-        }
-      }
-
-      debugPrint(
-        '[Token Refresh] Failed: ${response.statusCode} ${response.body}',
-      );
-      return false;
-    } catch (e) {
-      debugPrint('[Token Refresh Error] $e');
-      return false;
-    }
-  }
-
   static Future<Map<String, String>> _authHeaders() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    var token = prefs.getString(_tokenKey) ?? '';
-
-    if (token.isNotEmpty && _isJwtExpiredOrNearExpiry(token)) {
-      final refreshed = await refreshAccessToken();
-
-      if (refreshed) {
-        token = prefs.getString(_tokenKey) ?? '';
-      }
-    }
+    final token = await AuthService().getToken();
 
     return {
       'Content-Type': 'application/json',
-      if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
 
@@ -460,96 +368,47 @@ class AuthService {
     }
   }
 
-  static Future<Map<String, dynamic>> getReferralStatus() async {
-    try {
-      final response = await http
-          .get(
-            Uri.parse('$baseUrl/referrals/status/'),
-            headers: await _authHeaders(),
-          )
-          .timeout(const Duration(seconds: 15));
+static Future<Map<String, dynamic>> getTopupInstructions() async {
+  final fallback = {
+    'success': true,
+    'momo_number': '+233597565111',
+    'momo_name': 'Mugis Issah',
+    'whatsapp_number': '+233593338490',
+    'usd_rate': '',
+    'call_rate_per_minute_usd': '0.19',
+    'minimum_purchase_usd': '10',
+    'message': 'Top-up instructions loaded with fallback rate',
+  };
 
-      final data = jsonDecode(response.body);
+  try {
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/topup-instructions/'),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        )
+        .timeout(const Duration(seconds: 15));
 
-      if (data is Map<String, dynamic>) {
-        return data;
-      }
+    debugPrint('[Top-up Instructions] Status: ${response.statusCode}');
+    debugPrint('[Top-up Instructions] Body: ${response.body}');
 
-      return {'success': false, 'message': 'Could not load referral status'};
-    } catch (e) {
-      debugPrint('[Referral Status Error] $e');
-
-      return {'success': false, 'message': 'Could not load referral status'};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return fallback;
     }
-  }
 
-  static Future<Map<String, dynamic>> applyReferralCode(
-    String referralCode,
-  ) async {
-    try {
-      final response = await http
-          .post(
-            Uri.parse('$baseUrl/referrals/apply-code/'),
-            headers: await _authHeaders(),
-            body: jsonEncode({'referral_code': referralCode}),
-          )
-          .timeout(const Duration(seconds: 15));
+    final data = jsonDecode(response.body);
 
-      final data = jsonDecode(response.body);
-
-      if (data is Map<String, dynamic>) {
-        return data;
-      }
-
-      return {'success': false, 'message': 'Could not apply referral code'};
-    } catch (e) {
-      debugPrint('[Apply Referral Code Error] $e');
-
+    if (data is Map<String, dynamic>) {
       return {
-        'success': false,
-        'message':
-            'Could not apply referral code. Please check your internet connection.',
+        ...fallback,
+        ...data,
       };
     }
-  }
 
-  static Future<Map<String, dynamic>> getTopupInstructions() async {
-    final fallback = {
-      'success': true,
-      'momo_number': '+233597565111',
-      'momo_name': 'Mugis Issah',
-      'whatsapp_number': '+233593338490',
-      'usd_rate': '',
-      'call_rate_per_minute_usd': '0.19',
-      'minimum_purchase_usd': '10',
-      'message': 'Top-up instructions loaded with fallback rate',
-    };
-
-    try {
-      final response = await http
-          .get(
-            Uri.parse('$baseUrl/topup-instructions/'),
-            headers: {'Content-Type': 'application/json'},
-          )
-          .timeout(const Duration(seconds: 15));
-
-      debugPrint('[Top-up Instructions] Status: ${response.statusCode}');
-      debugPrint('[Top-up Instructions] Body: ${response.body}');
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        return fallback;
-      }
-
-      final data = jsonDecode(response.body);
-
-      if (data is Map<String, dynamic>) {
-        return {...fallback, ...data};
-      }
-
-      return fallback;
-    } catch (e) {
-      debugPrint('[Top-up Instructions Error] $e');
-      return fallback;
-    }
+    return fallback;
+  } catch (e) {
+    debugPrint('[Top-up Instructions Error] $e');
+    return fallback;
   }
 }
