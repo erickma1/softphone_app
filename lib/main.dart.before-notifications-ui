@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:linphone_flutter_plugin/linphoneflutterplugin.dart';
 // import 'package:permission_handler/permission_handler.dart';
@@ -11,10 +10,6 @@ import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'services/auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'services/auth_service.dart';
-import 'services/notification_service.dart';
-import 'screens/notifications_screen.dart';
-
 // import 'package:firebase_core/firebase_core.dart';
 // import 'firebase_options.dart';
 
@@ -142,9 +137,7 @@ class SoftphoneHomePage extends StatefulWidget {
   State<SoftphoneHomePage> createState() => _SoftphoneHomePageState();
 }
 
-// class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
-class _SoftphoneHomePageState extends State<SoftphoneHomePage>
-    with WidgetsBindingObserver {
+class _SoftphoneHomePageState extends State<SoftphoneHomePage> {
   final TextEditingController _referralCodeController = TextEditingController();
   bool _isApplyingReferralCode = false;
   Future<Map<String, dynamic>>? _referralStatusFuture;
@@ -153,10 +146,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
   // int _selectedIndex = 0; // 0: Dialer, 1: Contacts, 2: Call Log, 3: Settings
 
   int _selectedIndex = 0;
-
-  Timer? _notificationTimer;
-  int _unreadNotificationCount = 0;
-  bool _notificationCheckInProgress = false;
 
   // SIP settings
   final _sipUsernameController = TextEditingController();
@@ -264,17 +253,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     });
   }
 
-  // @override
-  // void initState() {
-  //   super.initState();
-  //   _initAndSetup();
   @override
   void initState() {
     super.initState();
-
-    WidgetsBinding.instance.addObserver(this);
-    _startNotificationChecks();
-
     _initAndSetup();
     _loadSavedSipDetails();
     _loadWalletData();
@@ -284,100 +265,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     });
     _searchController.addListener(_filterContacts);
     //_contactsFuture = _autoLoadContacts();
-  }
-
-  void _startNotificationChecks() {
-    _notificationTimer?.cancel();
-
-    _checkUnreadNotifications();
-
-    _notificationTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _checkUnreadNotifications(),
-    );
-  }
-
-  Future<void> _checkUnreadNotifications() async {
-    if (_notificationCheckInProgress) return;
-
-    _notificationCheckInProgress = true;
-
-    try {
-      final count = await NotificationService.getUnreadCount();
-
-      if (!mounted || count == null) return;
-
-      if (count != _unreadNotificationCount) {
-        setState(() {
-          _unreadNotificationCount = count;
-        });
-      }
-    } catch (e) {
-      debugPrint('[Notification Check Error] $e');
-    } finally {
-      _notificationCheckInProgress = false;
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-
-    if (state == AppLifecycleState.resumed) {
-      _checkUnreadNotifications();
-    }
-  }
-
-  Future<void> _openNotifications() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => NotificationsScreen(
-          onNotificationsChanged: _checkUnreadNotifications,
-        ),
-      ),
-    );
-
-    if (mounted) {
-      await _checkUnreadNotifications();
-    }
-  }
-
-  Widget _buildNotificationBell() {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        IconButton(
-          tooltip: 'Notifications',
-          onPressed: _openNotifications,
-          icon: const Icon(Icons.notifications_outlined),
-        ),
-        if (_unreadNotificationCount > 0)
-          Positioned(
-            right: 4,
-            top: 4,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white, width: 1.5),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _unreadNotificationCount > 99
-                    ? '99+'
-                    : _unreadNotificationCount.toString(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
   }
 
   Future<void> _initAndSetup() async {
@@ -2790,10 +2677,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
       appBar: AppBar(
         title: const Text(''),
         elevation: 0,
-        // actions: [
-        //   if (_isRegistered)
         actions: [
-          _buildNotificationBell(),
           if (_isRegistered)
             Container(
               margin: const EdgeInsets.all(8),
@@ -2883,14 +2767,8 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     );
   }
 
-  // @override
-  // void dispose() {
-  //   _sipUsernameController.dispose();
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _notificationTimer?.cancel();
-
     _sipUsernameController.dispose();
     _sipPasswordController.dispose();
     _sipDomainController.dispose();
