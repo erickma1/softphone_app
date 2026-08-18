@@ -1,4 +1,4 @@
-package com.example.softphone_app
+package com.numbersixlimited.softphone
 
 import io.flutter.embedding.android.FlutterActivity
 
