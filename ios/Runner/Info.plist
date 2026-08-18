@@ -68,5 +68,29 @@
 	</array>
 	<key>NSContactsUsageDescription</key>
 	<string>This app needs access to your contacts to let you call your friends and family</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.numbersix.softphone</string>
+
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>numbersix</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.numbersix.softphone</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>numbersix</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -358,6 +358,114 @@ class AuthService {
     }
   }
 
+  static Future<Map<String, dynamic>> getSupportInfo() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/support/'),
+        headers: await authHeaders(),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 &&
+          data is Map<String, dynamic> &&
+          data['success'] == true) {
+        return {
+          'success': true,
+          'whatsappUsername': data['whatsapp_username']?.toString() ?? '',
+          'categories': data['categories'] ?? [],
+        };
+      }
+
+      return {
+        'success': false,
+        'message': data is Map<String, dynamic>
+            ? data['message']?.toString() ??
+                  data['detail']?.toString() ??
+                  'Could not load support information'
+            : 'Could not load support information',
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> sendSupportMessage({
+    required String category,
+    required String subject,
+    required String message,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/support/'),
+        headers: await authHeaders(),
+        body: jsonEncode({
+          'category': category,
+          'subject': subject,
+          'message': message,
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 &&
+          data is Map<String, dynamic> &&
+          data['success'] == true) {
+        return {
+          'success': true,
+          'message':
+              data['message']?.toString() ??
+              'Your support message has been sent successfully.',
+        };
+      }
+
+      return {
+        'success': false,
+        'message': data is Map<String, dynamic>
+            ? data['message']?.toString() ??
+                  data['detail']?.toString() ??
+                  'Could not send support message'
+            : 'Could not send support message',
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> getRates() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/rates/'),
+        headers: await authHeaders(),
+      );
+
+      final decoded = jsonDecode(response.body);
+
+      if (response.statusCode == 200 &&
+          decoded is Map<String, dynamic> &&
+          decoded['success'] == true) {
+        return {
+          'success': true,
+          'ratePlan': decoded['rate_plan'],
+          'countries': decoded['countries'] ?? [],
+        };
+      }
+
+      String message = 'Could not fetch rates';
+
+      if (decoded is Map<String, dynamic>) {
+        message =
+            decoded['message']?.toString() ??
+            decoded['detail']?.toString() ??
+            message;
+      }
+
+      return {'success': false, 'message': message};
+    } catch (e) {
+      return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
   static Future<Map<String, dynamic>> createCheckoutSession({
     required String amount,
   }) async {
@@ -532,6 +640,100 @@ class AuthService {
       };
     } catch (e) {
       return {'success': false, 'message': 'Network error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> createTheTellerCheckout({
+    required String amount,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/topups/theteller/create/'),
+            headers: await authHeaders(),
+            body: jsonEncode({'amount': amount}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final decoded = jsonDecode(response.body);
+
+      final data = decoded is Map<String, dynamic>
+          ? decoded
+          : <String, dynamic>{};
+
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          data['success'] == true) {
+        return {
+          'success': true,
+          'message':
+              data['message']?.toString() ?? 'TheTeller checkout created',
+          'checkoutUrl': data['checkout_url']?.toString(),
+          'transactionId': data['transaction_id']?.toString(),
+          'reference': data['reference']?.toString(),
+          'walletAmount': data['wallet_amount']?.toString(),
+          'walletCurrency': data['wallet_currency']?.toString(),
+          'paymentAmount': data['payment_amount']?.toString(),
+          'paymentCurrency': data['payment_currency']?.toString(),
+          'exchangeRate': data['exchange_rate']?.toString(),
+        };
+      }
+
+      return {
+        'success': false,
+        'message':
+            data['message']?.toString() ?? 'Could not start TheTeller payment',
+      };
+    } catch (e) {
+      debugPrint('[TheTeller Checkout Error] $e');
+
+      return {
+        'success': false,
+        'message': 'Could not start payment. Please check your connection.',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> verifyTheTellerTopup({
+    required String transactionId,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/topups/theteller/verify/'),
+            headers: await authHeaders(),
+            body: jsonEncode({'transaction_id': transactionId}),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      final decoded = jsonDecode(response.body);
+
+      final data = decoded is Map<String, dynamic>
+          ? decoded
+          : <String, dynamic>{};
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {
+          'success': true,
+          'message':
+              data['message']?.toString() ??
+              'Payment verified and wallet credited',
+          'balance': data['balance'],
+          'alreadyProcessed': data['already_processed'] == true,
+        };
+      }
+
+      return {
+        'success': false,
+        'message':
+            data['message']?.toString() ?? 'Payment has not been verified yet',
+      };
+    } catch (e) {
+      debugPrint('[TheTeller Verify Error] $e');
+
+      return {
+        'success': false,
+        'message': 'Could not verify payment. Please check your connection.',
+      };
     }
   }
 

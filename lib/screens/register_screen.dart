@@ -164,7 +164,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    helperText: 'Example: 0244581191 or +233244581191',
+                    helperText: 'Example: +143244739484',
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {

@@ -48,6 +48,38 @@ class BalanceInfo {
   }
 }
 
+class CustomerInfo {
+  final int id;
+  final String name;
+  final String email;
+  final String phone;
+  final bool phoneVerified;
+  final String status;
+  final String? createdAt;
+
+  CustomerInfo({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.phone,
+    required this.phoneVerified,
+    required this.status,
+    this.createdAt,
+  });
+
+  factory CustomerInfo.fromJson(Map<String, dynamic> json) {
+    return CustomerInfo(
+      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
+      name: json['name']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      phone: json['phone']?.toString() ?? '',
+      phoneVerified: json['phone_verified'] == true,
+      status: json['status']?.toString() ?? '',
+      createdAt: json['created_at']?.toString(),
+    );
+  }
+}
+
 class User {
   final int userId;
   final String username;
@@ -56,6 +88,7 @@ class User {
   final String? refreshToken;
   final SipAccount? sip;
   final BalanceInfo? balance;
+  final CustomerInfo? customer;
 
   User({
     required this.userId,
@@ -65,6 +98,7 @@ class User {
     this.refreshToken,
     this.sip,
     this.balance,
+    this.customer,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -82,6 +116,9 @@ class User {
           : null,
       balance: json['balance'] is Map<String, dynamic>
           ? BalanceInfo.fromJson(json['balance'])
+          : null,
+      customer: json['customer'] is Map<String, dynamic>
+          ? CustomerInfo.fromJson(json['customer'])
           : null,
     );
   }

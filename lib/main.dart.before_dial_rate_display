@@ -202,147 +202,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
   String? _walletError;
   String? _historyError;
 
-  // Rates used by the dial pad for live destination detection.
-  List<Map<String, dynamic>> _dialRateCountries = [];
-  bool _dialRatesLoading = false;
-  String? _dialRatesError;
-
-  Future<void> _loadDialRates() async {
-    if (_dialRatesLoading) return;
-
-    if (mounted) {
-      setState(() {
-        _dialRatesLoading = true;
-        _dialRatesError = null;
-      });
-    }
-
-    final result = await AuthService.getRates();
-
-    if (!mounted) return;
-
-    if (result['success'] == true) {
-      final rawCountries = result['countries'];
-      final countries = <Map<String, dynamic>>[];
-
-      if (rawCountries is List) {
-        for (final item in rawCountries) {
-          if (item is Map) {
-            countries.add(Map<String, dynamic>.from(item));
-          }
-        }
-      }
-
-      setState(() {
-        _dialRateCountries = countries;
-        _dialRatesLoading = false;
-        _dialRatesError = null;
-      });
-    } else {
-      setState(() {
-        _dialRateCountries = [];
-        _dialRatesLoading = false;
-        _dialRatesError =
-            result['message']?.toString() ?? 'Could not load call rates.';
-      });
-    }
-  }
-
-  Map<String, dynamic>? _findDialRateMatch(String rawNumber) {
-    final digits = rawNumber.replaceAll(RegExp(r'[^0-9]'), '');
-
-    if (digits.isEmpty) return null;
-
-    Map<String, dynamic>? bestMatch;
-    int bestPrefixLength = -1;
-
-    for (final country in _dialRateCountries) {
-      final rawRates = country['rates'];
-
-      if (rawRates is! List) continue;
-
-      for (final item in rawRates) {
-        if (item is! Map) continue;
-
-        final rate = Map<String, dynamic>.from(item);
-        final prefix = (rate['prefix']?.toString() ?? '').replaceAll(
-          RegExp(r'[^0-9]'),
-          '',
-        );
-
-        if (prefix.isEmpty) continue;
-
-        if (digits.startsWith(prefix) && prefix.length > bestPrefixLength) {
-          bestPrefixLength = prefix.length;
-
-          bestMatch = {
-            'country': country['country']?.toString() ?? '',
-            'country_code': country['country_code']?.toString() ?? '',
-            'prefix': prefix,
-            'rate_per_minute':
-                rate['rate_per_minute'] ?? country['rate_per_minute'],
-          };
-        }
-      }
-    }
-
-    return bestMatch;
-  }
-
-  String _dialCountryFlag(String? countryCode) {
-    final code = (countryCode ?? '').trim().toUpperCase();
-
-    if (!RegExp(r'^[A-Z]{2}$').hasMatch(code)) {
-      return '🌐';
-    }
-
-    return String.fromCharCodes(
-      code.codeUnits.map((letter) => letter + 127397),
-    );
-  }
-
-  // String _formatDialRate(dynamic value) {
-  //   final raw = value?.toString().trim() ?? '';
-
-  //   if (raw.isEmpty) return '';
-
-  //   final parsed = double.tryParse(raw);
-
-  //   if (parsed == null) return raw;
-
-  //   var formatted = parsed.toStringAsFixed(6);
-
-  //   while (formatted.contains('.') && formatted.endsWith('0')) {
-  //     formatted = formatted.substring(0, formatted.length - 1);
-  //   }
-
-  //   if (formatted.endsWith('.')) {
-  //     formatted = formatted.substring(0, formatted.length - 1);
-  //   }
-
-  //   return formatted;
-  // }
-
-  String _formatDialRate(dynamic value) {
-    final raw = value?.toString().trim() ?? '';
-
-    if (raw.isEmpty) return '';
-
-    final parsed = double.tryParse(raw);
-
-    if (parsed == null) return raw;
-
-    var formatted = parsed.toStringAsFixed(6);
-
-    while (formatted.contains('.') &&
-        formatted.endsWith('0') &&
-        formatted.split('.')[1].length > 2) {
-      formatted = formatted.substring(0, formatted.length - 1);
-    }
-
-    return formatted;
-  }
-
   Future<void> _loadSavedSipDetails() async {
     final auth = AuthService();
     final sip = await auth.getSipDetails();
@@ -415,17 +274,9 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     _startNotificationChecks();
 
     _initAndSetup();
-    // _loadSavedSipDetails();
-    // _loadWalletData();
-    // _loadServerCdrs();
-    // _dialNumberController.addListener(() {
-    //   if (mounted) setState(() {});
-    // });
     _loadSavedSipDetails();
     _loadWalletData();
     _loadServerCdrs();
-    _loadDialRates();
-
     _dialNumberController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -466,26 +317,12 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     }
   }
 
-  // @override
-  // void didChangeAppLifecycleState(AppLifecycleState state) {
-  //   super.didChangeAppLifecycleState(state);
-
-  //   if (state == AppLifecycleState.resumed) {
-  //     _checkUnreadNotifications();
-  //   }
-  // }
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
     if (state == AppLifecycleState.resumed) {
       _checkUnreadNotifications();
-
-      _loadWalletData();
-
-      setState(() {
-        _referralStatusFuture = AuthService.getReferralStatus();
-      });
     }
   }
 
@@ -1256,47 +1093,18 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     }
   }
 
-  // String _formatDurationFromSeconds(dynamic value) {
-  //   final seconds = int.tryParse(value?.toString() ?? '0') ?? 0;
-
-  //   if (seconds <= 0) return '0s';
-
-  //   final minutes = seconds ~/ 60;
-  //   final remainingSeconds = seconds % 60;
-
-  //   if (minutes == 0) return '${remainingSeconds}s';
-  //   if (remainingSeconds == 0) return '${minutes}m';
-
-  //   return '${minutes}m ${remainingSeconds}s';
-  // }
   String _formatDurationFromSeconds(dynamic value) {
     final seconds = int.tryParse(value?.toString() ?? '0') ?? 0;
 
     if (seconds <= 0) return '0s';
 
-    return '${seconds}s';
-  }
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
 
-  String _formatHistoryCost(dynamic value) {
-    final raw = value?.toString().trim() ?? '';
+    if (minutes == 0) return '${remainingSeconds}s';
+    if (remainingSeconds == 0) return '${minutes}m';
 
-    if (raw.isEmpty) return '';
-
-    final parsed = double.tryParse(raw);
-
-    if (parsed == null) return raw;
-
-    var formatted = parsed.toStringAsFixed(6);
-
-    while (formatted.contains('.') && formatted.endsWith('0')) {
-      formatted = formatted.substring(0, formatted.length - 1);
-    }
-
-    if (formatted.endsWith('.')) {
-      formatted = formatted.substring(0, formatted.length - 1);
-    }
-
-    return formatted;
+    return '${minutes}m ${remainingSeconds}s';
   }
 
   String _formatServerDate(dynamic value) {
@@ -1538,497 +1346,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     );
   }
 
-  Future<void> _showTheTellerVerificationDialog({
-    required String transactionId,
-    required String paymentAmount,
-    required String paymentCurrency,
-  }) async {
-    bool verifying = false;
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Complete Payment'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Complete the payment in the browser, then return to Number 6 Softphone and tap Verify Payment.',
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Amount: $paymentCurrency $paymentAmount',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Transaction ID: $transactionId',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  if (verifying) ...[
-                    const SizedBox(height: 20),
-                    const Center(child: CircularProgressIndicator()),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: verifying
-                      ? null
-                      : () {
-                          Navigator.pop(dialogContext);
-                        },
-                  child: const Text('Verify Later'),
-                ),
-                ElevatedButton.icon(
-                  onPressed: verifying
-                      ? null
-                      : () async {
-                          setDialogState(() {
-                            verifying = true;
-                          });
-
-                          final result = await AuthService.verifyTheTellerTopup(
-                            transactionId: transactionId,
-                          );
-
-                          if (!mounted) return;
-
-                          if (result['success'] == true) {
-                            Navigator.pop(dialogContext);
-
-                            await _loadWalletData();
-
-                            if (!mounted) return;
-
-                            setState(() {
-                              _referralStatusFuture =
-                                  AuthService.getReferralStatus();
-                            });
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _safeApiMessage(
-                                    result['message'],
-                                    fallback:
-                                        'Payment verified and wallet credited.',
-                                  ),
-                                ),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                          } else {
-                            setDialogState(() {
-                              verifying = false;
-                            });
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _safeApiMessage(
-                                    result['message'],
-                                    fallback:
-                                        'Payment has not been verified yet.',
-                                  ),
-                                ),
-                                backgroundColor: Colors.orange,
-                              ),
-                            );
-                          }
-                        },
-                  icon: const Icon(Icons.verified),
-                  label: Text(verifying ? 'Verifying...' : 'Verify Payment'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // Future<void> _showTopUpDialog() async {
-  //   final amountController = TextEditingController();
-  //   bool processing = false;
-
-  //   await showDialog(
-  //     context: context,
-  //     builder: (dialogContext) {
-  //       return StatefulBuilder(
-  //         builder: (context, setDialogState) {
-  //           return AlertDialog(
-  //             title: const Text('Top Up Wallet'),
-  //             content: SingleChildScrollView(
-  //               child: Column(
-  //                 mainAxisSize: MainAxisSize.min,
-  //                 crossAxisAlignment: CrossAxisAlignment.start,
-  //                 children: [
-  //                   const Text(
-  //                     'Enter the USD amount you want added to your wallet.',
-  //                   ),
-  //                   const SizedBox(height: 16),
-
-  //                   TextField(
-  //                     controller: amountController,
-  //                     enabled: !processing,
-  //                     keyboardType:
-  //                         const TextInputType.numberWithOptions(
-  //                           decimal: true,
-  //                         ),
-  //                     decoration: const InputDecoration(
-  //                       labelText: 'Amount to add (USD)',
-  //                       hintText: 'Example: 0.50',
-  //                       prefixText: 'US\$ ',
-  //                       border: OutlineInputBorder(),
-  //                     ),
-  //                   ),
-
-  //                   const SizedBox(height: 16),
-
-  //                   Container(
-  //                     width: double.infinity,
-  //                     padding: const EdgeInsets.all(12),
-  //                     decoration: BoxDecoration(
-  //                       color: Colors.blue.shade50,
-  //                       borderRadius: BorderRadius.circular(10),
-  //                     ),
-  //                     child: const Text(
-  //                       'Your payment will be processed securely in Ghana cedis (GHS).',
-  //                     ),
-  //                   ),
-
-  //                   if (processing) ...[
-  //                     const SizedBox(height: 20),
-  //                     const Center(
-  //                       child: CircularProgressIndicator(),
-  //                     ),
-  //                   ],
-  //                 ],
-  //               ),
-  //             ),
-
-  //             actions: [
-  //               ElevatedButton.icon(
-  //                 onPressed: processing
-  //                     ? null
-  //                     : () async {
-  //                         final amountText =
-  //                             amountController.text.trim();
-
-  //                         final amount =
-  //                             double.tryParse(amountText);
-
-  //                         if (amount == null || amount <= 0) {
-  //                           ScaffoldMessenger.of(context).showSnackBar(
-  //                             const SnackBar(
-  //                               content: Text(
-  //                                 'Please enter a valid amount.',
-  //                               ),
-  //                               backgroundColor: Colors.red,
-  //                             ),
-  //                           );
-  //                           return;
-  //                         }
-
-  //                         setDialogState(() {
-  //                           processing = true;
-  //                         });
-
-  //                         final result =
-  //                             await AuthService.createTheTellerCheckout(
-  //                               amount: amount.toStringAsFixed(2),
-  //                             );
-
-  //                         if (!mounted) return;
-
-  //                         if (result['success'] != true) {
-  //                           setDialogState(() {
-  //                             processing = false;
-  //                           });
-
-  //                           ScaffoldMessenger.of(context).showSnackBar(
-  //                             SnackBar(
-  //                               content: Text(
-  //                                 _safeApiMessage(
-  //                                   result['message'],
-  //                                   fallback:
-  //                                       'Could not start payment. Please try again.',
-  //                                 ),
-  //                               ),
-  //                               backgroundColor: Colors.orange,
-  //                             ),
-  //                           );
-  //                           return;
-  //                         }
-
-  //                         final checkoutUrl =
-  //                             result['checkoutUrl']?.toString() ?? '';
-
-  //                         if (checkoutUrl.isEmpty) {
-  //                           setDialogState(() {
-  //                             processing = false;
-  //                           });
-
-  //                           ScaffoldMessenger.of(context).showSnackBar(
-  //                             const SnackBar(
-  //                               content: Text(
-  //                                 'Could not start payment. Please try again.',
-  //                               ),
-  //                               backgroundColor: Colors.red,
-  //                             ),
-  //                           );
-  //                           return;
-  //                         }
-
-  //                         final uri = Uri.tryParse(checkoutUrl);
-
-  //                         if (uri == null ||
-  //                             !await canLaunchUrl(uri)) {
-  //                           setDialogState(() {
-  //                             processing = false;
-  //                           });
-
-  //                           ScaffoldMessenger.of(context).showSnackBar(
-  //                             const SnackBar(
-  //                               content: Text(
-  //                                 'Could not open payment page.',
-  //                               ),
-  //                               backgroundColor: Colors.red,
-  //                             ),
-  //                           );
-  //                           return;
-  //                         }
-
-  //                         Navigator.pop(dialogContext);
-
-  //                         await launchUrl(
-  //                           uri,
-  //                           mode: LaunchMode.externalApplication,
-  //                         );
-  //                       },
-  //                 icon: const Icon(Icons.payment),
-  //                 label: Text(
-  //                   processing
-  //                       ? 'Please wait...'
-  //                       : 'Make Payment',
-  //                 ),
-  //               ),
-
-  //               TextButton(
-  //                 onPressed: processing
-  //                     ? null
-  //                     : () {
-  //                         Navigator.pop(dialogContext);
-  //                       },
-  //                 child: const Text('Cancel'),
-  //               ),
-  //             ],
-  //           );
-  //         },
-  //       );
-  //     },
-  //   );
-
-  //   amountController.dispose();
-  // }
-
-  Future<void> _showTopUpDialog() async {
-    final amountController = TextEditingController();
-    bool processing = false;
-
-    await showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Top Up Wallet'),
-
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Enter the USD amount you want added to your wallet.',
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    TextField(
-                      controller: amountController,
-                      enabled: !processing,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Amount to add (USD)',
-                        hintText: 'Example: 5.00',
-                        prefixText: 'US\$ ',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Text(
-                        'Your payment will be processed securely in Ghana cedis (GHS).',
-                      ),
-                    ),
-
-                    if (processing) ...[
-                      const SizedBox(height: 20),
-                      const Center(child: CircularProgressIndicator()),
-                    ],
-                  ],
-                ),
-              ),
-
-              actions: [
-                ElevatedButton.icon(
-                  onPressed: processing
-                      ? null
-                      : () async {
-                          final amountText = amountController.text.trim();
-
-                          final amount = double.tryParse(amountText);
-
-                          if (amount == null || amount <= 0) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Please enter a valid amount.'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                            return;
-                          }
-
-                          setDialogState(() {
-                            processing = true;
-                          });
-
-                          final result =
-                              await AuthService.createTheTellerCheckout(
-                                amount: amount.toStringAsFixed(2),
-                              );
-
-                          if (!mounted) return;
-
-                          if (result['success'] != true) {
-                            setDialogState(() {
-                              processing = false;
-                            });
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  _safeApiMessage(
-                                    result['message'],
-                                    fallback:
-                                        'Could not start payment. Please try again.',
-                                  ),
-                                ),
-                                backgroundColor: Colors.orange,
-                              ),
-                            );
-
-                            return;
-                          }
-
-                          final checkoutUrl =
-                              result['checkoutUrl']?.toString() ?? '';
-
-                          if (checkoutUrl.isEmpty) {
-                            setDialogState(() {
-                              processing = false;
-                            });
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Could not start payment. Please try again.',
-                                ),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-
-                            return;
-                          }
-
-                          final uri = Uri.tryParse(checkoutUrl);
-
-                          if (uri == null || !await canLaunchUrl(uri)) {
-                            setDialogState(() {
-                              processing = false;
-                            });
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Could not open payment page.'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-
-                            return;
-                          }
-
-                          Navigator.pop(dialogContext);
-
-                          final launched = await launchUrl(
-                            uri,
-                            mode: LaunchMode.externalApplication,
-                          );
-
-                          if (!mounted) return;
-
-                          if (!launched) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Could not open payment page.'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                          }
-                        },
-
-                  icon: const Icon(Icons.payment),
-
-                  label: Text(processing ? 'Please wait...' : 'Make Payment'),
-                ),
-
-                TextButton(
-                  onPressed: processing
-                      ? null
-                      : () {
-                          Navigator.pop(dialogContext);
-                        },
-                  child: const Text('Cancel'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    amountController.dispose();
-  }
-
-  // void _showTopUpDialog() {
-  void _showManualTopUpDialog() {
+  void _showTopUpDialog() {
     showDialog(
       context: context,
       builder: (dialogContext) {
@@ -2408,107 +1726,23 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
 
                 final answeredTime = _formatServerDate(call['answered_time']);
 
-                // final cost =
-                //     call['cost'] ?? call['charged_amount'] ?? call['amount'];
-
-                // return Card(
                 final cost =
                     call['cost'] ?? call['charged_amount'] ?? call['amount'];
 
-                final formattedCost = _formatHistoryCost(cost);
-
-                final rateMatch = _findDialRateMatch(number);
-
-                final countryCode =
-                    rateMatch?['country_code']?.toString().trim() ?? '';
-
-                final countryFlag = _dialCountryFlag(countryCode);
-
                 return Card(
-                  // child: ListTile(
-                  //   leading: CircleAvatar(
-                  //     backgroundColor: Colors.green[100],
-                  //     child: const Icon(Icons.call_made, color: Colors.green),
-                  //   ),
-                  //   title: Text(
-                  //     number,
-                  //     style: const TextStyle(fontWeight: FontWeight.bold),
-                  //   ),
-                  //   subtitle: Text(
-                  //     cost != null
-                  //         ? '$answeredTime • $duration • Cost: $cost'
-                  //         : '$answeredTime • $duration',
-                  //   ),
-                  //   trailing: IconButton(
-                  //     icon: const Icon(Icons.call, color: Colors.green),
-                  //     onPressed: () {
-                  //       _dialNumberController.text = number;
-                  //       setState(() => _selectedIndex = 0);
-                  //     },
-                  //   ),
-                  // ),
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 6,
-                    ),
                     leading: CircleAvatar(
                       backgroundColor: Colors.green[100],
                       child: const Icon(Icons.call_made, color: Colors.green),
                     ),
-                    title: Row(
-                      children: [
-                        Text(countryFlag, style: const TextStyle(fontSize: 20)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            number,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      ],
+                    title: Text(
+                      number,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    subtitle: Padding(
-                      padding: const EdgeInsets.only(top: 5),
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            answeredTime,
-                            style: TextStyle(
-                              color: Colors.grey.shade600,
-                              fontSize: 12,
-                            ),
-                          ),
-                          Text(
-                            '•',
-                            style: TextStyle(color: Colors.grey.shade500),
-                          ),
-                          Text(
-                            duration,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          if (formattedCost.isNotEmpty) ...[
-                            Text(
-                              '•',
-                              style: TextStyle(color: Colors.grey.shade500),
-                            ),
-                            Text(
-                              'US\$ $formattedCost',
-                              style: TextStyle(
-                                color: Colors.blue.shade700,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
+                    subtitle: Text(
+                      cost != null
+                          ? '$answeredTime • $duration • Cost: $cost'
+                          : '$answeredTime • $duration',
                     ),
                     trailing: IconButton(
                       icon: const Icon(Icons.call, color: Colors.green),
@@ -2602,89 +1836,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
     );
   }
 
-  // Widget _buildNumberDisplayCard({
-  //   required double displayFontSize,
-  //   required bool compact,
-  // }) {
-  //   final bool showStatus =
-  //       _currentCallState != null &&
-  //       _currentCallState != CallState.Idle &&
-  //       _currentCallState != CallState.End;
-
-  //   return Container(
-  //     width: double.infinity,
-  //     padding: EdgeInsets.symmetric(
-  //       horizontal: compact ? 10 : 16,
-  //       vertical: compact ? 10 : 16,
-  //     ),
-  //     decoration: BoxDecoration(
-  //       color: Colors.white,
-  //       borderRadius: BorderRadius.circular(18),
-  //       border: Border.all(color: Colors.grey.shade300),
-  //       boxShadow: [
-  //         BoxShadow(
-  //           color: Colors.black.withOpacity(0.04),
-  //           blurRadius: 8,
-  //           offset: const Offset(0, 2),
-  //         ),
-  //       ],
-  //     ),
-  //     child: Column(
-  //       mainAxisSize: MainAxisSize.min,
-  //       children: [
-  //         TextField(
-  //           controller: _dialNumberController,
-  //           textAlign: TextAlign.center,
-  //           keyboardType: TextInputType.phone,
-  //           maxLines: 1,
-  //           style: TextStyle(
-  //             fontSize: displayFontSize,
-  //             fontWeight: FontWeight.bold,
-  //             letterSpacing: 1.0,
-  //           ),
-  //           decoration: InputDecoration(
-  //             hintText: 'Enter number',
-  //             hintStyle: TextStyle(
-  //               color: Colors.grey.shade400,
-  //               fontSize: compact ? 24 : 30,
-  //               fontWeight: FontWeight.w500,
-  //             ),
-  //             border: InputBorder.none,
-  //             isDense: true,
-  //             contentPadding: EdgeInsets.zero,
-  //           ),
-  //         ),
-
-  //         if (showStatus) ...[
-  //           SizedBox(height: compact ? 8 : 12),
-  //           Chip(
-  //             label: Text(_currentCallState.toString().split('.').last),
-  //             backgroundColor: _getCallStateColor(),
-  //             labelStyle: const TextStyle(
-  //               color: Colors.white,
-  //               fontWeight: FontWeight.w600,
-  //             ),
-  //           ),
-  //         ],
-
-  //         if (_debugMessage.isNotEmpty) ...[
-  //           SizedBox(height: compact ? 4 : 8),
-  //           Text(
-  //             _debugMessage,
-  //             textAlign: TextAlign.center,
-  //             maxLines: 1,
-  //             overflow: TextOverflow.ellipsis,
-  //             style: TextStyle(
-  //               color: Colors.grey.shade600,
-  //               fontSize: compact ? 11 : 12,
-  //             ),
-  //           ),
-  //         ],
-  //       ],
-  //     ),
-  //   );
-  // }
-
   Widget _buildNumberDisplayCard({
     required double displayFontSize,
     required bool compact,
@@ -2693,24 +1844,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
         _currentCallState != null &&
         _currentCallState != CallState.Idle &&
         _currentCallState != CallState.End;
-
-    final String dialText = _dialNumberController.text.trim();
-    final bool hasDialText = dialText.isNotEmpty;
-
-    final bool invalidDialFormat =
-        dialText.startsWith('+') || dialText.startsWith('00');
-
-    final Map<String, dynamic>? rateMatch = invalidDialFormat
-        ? null
-        : _findDialRateMatch(dialText);
-
-    final String matchedCountry =
-        rateMatch?['country']?.toString().trim() ?? '';
-
-    final String matchedCountryCode =
-        rateMatch?['country_code']?.toString().trim() ?? '';
-
-    final String matchedRate = _formatDialRate(rateMatch?['rate_per_minute']);
 
     return Container(
       width: double.infinity,
@@ -2755,120 +1888,6 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
               contentPadding: EdgeInsets.zero,
             ),
           ),
-
-          // Guide shown before the customer starts dialing.
-          if (!hasDialText) ...[
-            SizedBox(height: compact ? 5 : 7),
-            Text(
-              'Enter country code + number',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: compact ? 11 : 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              'Example: 233244842271',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade500,
-                fontSize: compact ? 10 : 11,
-              ),
-            ),
-
-            // Warn if the customer starts with + or 00.
-          ] else if (invalidDialFormat) ...[
-            SizedBox(height: compact ? 5 : 7),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  size: compact ? 14 : 16,
-                  color: Colors.orange.shade700,
-                ),
-                const SizedBox(width: 5),
-                Flexible(
-                  child: Text(
-                    'Dial with country code only — remove + or 00',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.orange.shade800,
-                      fontSize: compact ? 10 : 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            // Country and rate once the prefix is recognised.
-          ] else if (rateMatch != null &&
-              matchedCountry.isNotEmpty &&
-              matchedRate.isNotEmpty) ...[
-            SizedBox(height: compact ? 5 : 7),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _dialCountryFlag(matchedCountryCode),
-                  style: TextStyle(fontSize: compact ? 18 : 20),
-                ),
-                const SizedBox(width: 7),
-                Flexible(
-                  child: Text(
-                    '$matchedCountry  •  US\$ $matchedRate/min',
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.blue.shade700,
-                      fontSize: compact ? 11 : 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            // Rates are still downloading.
-          ] else if (_dialRatesLoading) ...[
-            SizedBox(height: compact ? 5 : 7),
-            Text(
-              'Checking destination rate...',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade500,
-                fontSize: compact ? 10 : 11,
-              ),
-            ),
-
-            // Rate download failed.
-          ] else if (_dialRatesError != null) ...[
-            SizedBox(height: compact ? 5 : 7),
-            Text(
-              'Rate information temporarily unavailable',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade500,
-                fontSize: compact ? 10 : 11,
-              ),
-            ),
-
-            // Number has started but country prefix isn't complete yet.
-          ] else ...[
-            SizedBox(height: compact ? 5 : 7),
-            Text(
-              'Enter the full country code to see the calling rate',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade500,
-                fontSize: compact ? 10 : 11,
-              ),
-            ),
-          ],
 
           if (showStatus) ...[
             SizedBox(height: compact ? 8 : 12),
@@ -3518,7 +2537,10 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
       onSupport: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => const SupportScreen()),
+          MaterialPageRoute(
+            builder: (context) =>
+                const SupportScreen(),
+          ),
         );
       },
 
@@ -3856,7 +2878,7 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
         type: BottomNavigationBarType.fixed,
-
+    
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dialpad), label: 'Dialer'),
           BottomNavigationBarItem(
