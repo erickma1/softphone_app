@@ -55,11 +55,27 @@
 
     </application>
 
-    <queries>
+    <!-- <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
         </intent>
+    </queries> -->
+
+    <queries>
+
+    <!-- Allow the app to detect/open HTTPS links in the browser -->
+    <intent>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="https" />
+    </intent>
+
+    <intent>
+        <action android:name="android.intent.action.PROCESS_TEXT" />
+        <data android:mimeType="text/plain" />
+    </intent>
+
     </queries>
 
 </manifest>

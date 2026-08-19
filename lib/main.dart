@@ -1968,39 +1968,99 @@ class _SoftphoneHomePageState extends State<SoftphoneHomePage>
                             return;
                           }
 
+                          // final uri = Uri.tryParse(checkoutUrl);
+
+                          // if (uri == null ||
+                          //     (uri.scheme != 'https' && uri.scheme != 'http')) {
+                          //   setDialogState(() {
+                          //     processing = false;
+                          //   });
+
+                          //   ScaffoldMessenger.of(context).showSnackBar(
+                          //     const SnackBar(
+                          //       content: Text(
+                          //         'Invalid payment page. Please try again.',
+                          //       ),
+                          //       backgroundColor: Colors.red,
+                          //     ),
+                          //   );
+                          //   return;
+                          // }
+
+
+
+                          // Navigator.pop(dialogContext);
+
+                          // final launched = await launchUrl(
+                          //   uri,
+                          //   mode: LaunchMode.externalApplication,
+                          // );
+
+                          // if (!mounted) return;
+
+                          // if (!launched) {
+                          //   ScaffoldMessenger.of(context).showSnackBar(
+                          //     const SnackBar(
+                          //       content: Text('Could not open payment page.'),
+                          //       backgroundColor: Colors.red,
+                          //     ),
+                          //   );
+                          // }
+
                           final uri = Uri.tryParse(checkoutUrl);
 
-                          if (uri == null || !await canLaunchUrl(uri)) {
+                          if (uri == null ||
+                              (uri.scheme != 'https' && uri.scheme != 'http')) {
                             setDialogState(() {
                               processing = false;
                             });
 
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Could not open payment page.'),
+                                content: Text(
+                                  'Invalid payment page. Please try again.',
+                                ),
                                 backgroundColor: Colors.red,
                               ),
                             );
-
                             return;
                           }
 
                           Navigator.pop(dialogContext);
 
-                          final launched = await launchUrl(
-                            uri,
-                            mode: LaunchMode.externalApplication,
-                          );
+                          try {
+                            final launched = await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            );
 
-                          if (!mounted) return;
+                            if (!mounted) return;
 
-                          if (!launched) {
+                            if (!launched) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Could not open payment page. Please try again.',
+                                  ),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
+                            }
+                          } catch (e) {
+                            debugPrint('[Payment URL Launch Error] $e');
+
+                            if (!mounted) return;
+
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Could not open payment page.'),
+                                content: Text(
+                                  'Could not open payment page. Please try again.',
+                                ),
                                 backgroundColor: Colors.red,
                               ),
                             );
+                            return;
                           }
                         },
 
